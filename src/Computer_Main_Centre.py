@@ -3395,7 +3395,18 @@ def handle_command(s: str):
     if low == "back":
         op_back(); return
 
+    if low in ("cd", "cd ~"):
+        op_home(); return
+
+    if low in ("cd ..", "..", "cd..", "../"):
+        op_cd(str(CWD.parent)); return
+
     m = re.match(r"^cd\s+'(.+?)'$", s, re.I)
+    if m:
+        op_cd(m.group(1)); return
+
+    # cd without quotes (unquoted path)
+    m = re.match(r"^cd\s+(\S+)$", s, re.I)
     if m:
         op_cd(m.group(1)); return
 
@@ -3603,9 +3614,10 @@ def show_help(topic: str | None = None) -> None:
 -----------------------------------
 
 Movement:
-• cd '<path>'                     Change directory
-• cd ..                           Go up
-• cd                              Go to HOME
+• cd '<path>'                     Change directory (quoted)
+• cd <path>                       Change directory (unquoted)
+• cd ..  or  ..                   Go up one folder
+• cd  or  cd ~                    Go to HOME
 • home                            Go to HOME (explicit)
 • back                            Go to previous directory
 • list                            List current folder
