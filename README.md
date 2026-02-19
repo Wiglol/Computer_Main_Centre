@@ -47,10 +47,10 @@ Double-click `Start_CMC.vbs`
 CMC makes GitHub publishing straightforward:
 
 ```
-git upload          push local changes to GitHub (stages, commits, pushes)
-git update          pull latest changes from GitHub
+git upload          create a new GitHub repo and publish the current folder to it
+git update          commit and push changes to the already-linked repo
 git download        clone a repo into the current folder
-git link            connect the current folder to an existing GitHub repo
+git link            link the current folder to an existing GitHub repo
 git status          show branch, staged/unstaged changes
 git log             recent commit history
 git doctor          diagnose common git problems
