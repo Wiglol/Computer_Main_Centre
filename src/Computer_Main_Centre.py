@@ -4471,6 +4471,14 @@ style = Style.from_dict({
 
 def main():
     global CWD
+
+    # Give the background update-check thread a moment to finish before painting
+    # the header — it's fast (git fetch locally), so 1.5s is more than enough.
+    import time as _time
+    _deadline = _time.monotonic() + 1.5
+    while STATE.get("cmc_update_status") == "checking" and _time.monotonic() < _deadline:
+        _time.sleep(0.05)
+
     show_header()
 
     # Show update notes once after an update (if UpdateNotes/LATEST.txt exists)
