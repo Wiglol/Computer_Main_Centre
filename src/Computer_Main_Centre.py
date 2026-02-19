@@ -4432,7 +4432,7 @@ def build_completer():
 
 
 # create a prompt session
-session = PromptSession()
+session = PromptSession(mouse_support=True)
 
 # 🎨 CMC cyan theme style
 style = Style.from_dict({
