@@ -91,8 +91,8 @@ info '<path>'              show file/folder details
 ═══════════════════════════════════════
 PATH INDEX (fast global)
 ═══════════════════════════════════════
-/qbuild C D E              build index of drives C, D, E
-/qfind <query>             fuzzy search across index
+/build C D E               build index of drives C, D, E
+/find <query>              fuzzy search across index
 /qcount                    show how many paths are indexed
 
 ═══════════════════════════════════════
@@ -217,7 +217,6 @@ sendkeys "text{ENTER}"     only if user explicitly asked
 DOWNLOAD / WEB
 ═══════════════════════════════════════
 search web <query>
-youtube <query>
 open url '<url>'
 download '<url>' to '<destination-folder>'
 downloadlist '<urls.txt>' to '<destination-folder>'

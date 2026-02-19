@@ -168,17 +168,17 @@ Extended list options:
 
 ## 4.3 Quick Path Index (fast global fuzzy search)
 Build index:
-- `/qbuild <drive letters...>`
-  Example: `/qbuild C D E`
+- `/build <drive letters...>`
+  Example: `/build C D E`
 
 Query index:
-- `/qfind <query>`
-  Example: `/qfind Atlauncher Server`
+- `/find <query>`
+  Example: `/find Atlauncher Server`
 
 Index stats:
 - `/qcount`
 
-Note: Run `/qbuild` once per machine to create the index. Re-run after major file changes.
+Note: Run `/build` once per machine to create the index. Re-run after major file changes.
 
 ---
 
@@ -333,7 +333,6 @@ Input automation (use only if user explicitly asks):
 
 Browser helpers:
 - `search web <query>`
-- `youtube <query>`
 - `open url '<url>'` (or without quotes)
 
 Downloads (canonical CMC syntax):
@@ -482,7 +481,7 @@ ai-model set qwen2.5:14b-instruct
 
 Build path index on drives C and D:
 ```cmc
-/qbuild C D
+/build C D
 ```
 
 ---

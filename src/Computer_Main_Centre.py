@@ -2487,7 +2487,7 @@ COMMAND_HINTS = [
     "zip","unzip","open","explore","backup","run",
     "download","downloadlist","open url",
     "batch on","batch off","dry-run on","dry-run off","ssl on","ssl off","status","log","undo",
-    "macro add <name> = <commands>","macro run <name>","macro list","macro delete <name>","macro clear","help","exit", "search web <query>","youtube <query>","webcreate",
+    "macro add <name> = <commands>","macro run <name>","macro list","macro delete <name>","macro clear","help","exit", "search web <query>","webcreate",
 ]
 
 def suggest_commands(s: str):
@@ -3491,20 +3491,7 @@ def handle_command(s: str):
             p("Usage: search web <text>")
         return
 
-    m = re.match(r"^youtube\s+(.+)$", s, re.I)
-    if m:
-        q = m.group(1).strip()
-        if q:
-            url = "https://www.youtube.com/results?search_query=" + urllib.parse.quote_plus(q)
-            webbrowser.open(url)
-            p(f"[cyan]🎬 Opened YouTube search for:[/cyan] {q}")
-        else:
-            p("Usage: youtube <text>")
-        return
-
-
-        
-        # ---------- Web search (opens your default browser e.g., Brave) ----------
+    # ---------- Web search (opens your default browser e.g., Brave) ----------
     m = re.match(r"^search\s+web\s+(.+)$", s, re.I)
     if m:
         q = m.group(1).strip()
@@ -3514,17 +3501,6 @@ def handle_command(s: str):
             p(f"[cyan]🌐 Opened Google search for:[/cyan] {q}")
         else:
             p("Usage: search web <text>")
-        return
-
-    m = re.match(r"^youtube\s+(.+)$", s, re.I)
-    if m:
-        q = m.group(1).strip()
-        if q:
-            url = "https://www.youtube.com/results?search_query=" + urllib.parse.quote_plus(q)
-            webbrowser.open(url)
-            p(f"[cyan]🎬 Opened YouTube search for:[/cyan] {q}")
-        else:
-            p("Usage: youtube <text>")
         return
         
     # ---------- Local Path Index: Super Fuzzy Search ----------
@@ -3562,8 +3538,8 @@ def handle_command(s: str):
             p(f"[red]Quick-count error:[/red] {e}")
         return
 
-    # /qbuild [targets...]
-    m = re.match(r"^/qbuild(?:\s+(.+))?$", s, re.I)
+    # /build [targets...]
+    m = re.match(r"^/build(?:\s+(.+))?$", s, re.I)
     if m:
         targets = m.group(1)
         try:
@@ -3696,10 +3672,10 @@ Inside-file search:
 • search '<text>'                 Search contents inside files
 
 Quick Path Index (fast global fuzzy search):
-• /qbuild <drive letters...>
+• /build <drive letters...>
   Build/update the path index for the given drives.
   Example:
-    /qbuild C D E
+    /build C D E
 
 • /find <query>
   Global fuzzy-style search using the index (fast).
@@ -3707,14 +3683,13 @@ Quick Path Index (fast global fuzzy search):
     /find Atlauncher Server
 
 Notes:
-• Run /qbuild first (once per machine, rerun if drives change).
+• Run /build first (once per machine, rerun if drives change).
 
 Examples:
   find 'log'
   findext '.json'
   search 'error'
-  /qbuild C D
-  /qfind taitaja toolkit
+  /build C D
   /find NBTExplorer 2.8
 """
 
@@ -3947,7 +3922,6 @@ Input:
 
 Browser helpers:
 • search web <query>               Open a browser search
-• youtube <query>                  Search YouTube in browser
 
 Downloads:
 • download '<url>' ['<file>']      Download a file (optional output name)
@@ -3963,7 +3937,6 @@ Flags:
 Examples:
   download 'https://example.com/app.zip' 'app.zip'
   download_list '%HOME%/Desktop/links.txt'
-  youtube "lofi"
   search web "java install"
 """
 
@@ -4260,7 +4233,7 @@ def complete_command(text, state):
 
     # Internet
     "download", "open url",
-    "search web", "youtube",
+    "search web",
 
     # Modes / safety
     "batch on", "batch off", "dry-run on", "dry-run off",
@@ -4275,7 +4248,7 @@ def complete_command(text, state):
     "/gitfix", "/gitlfs setup",
 
     # Path index
-    "/qfind", "/qcount", "/qbuild",
+    "/find", "/qcount", "/build",
 
     # Java
     "java list", "java version", "java change", "java reload",
@@ -4388,7 +4361,7 @@ def build_completer():
         "zip", "unzip", "open", "explore", "backup", "run",
         # Internet
         "download", "downloadlist", "open url",
-        "search web", "youtube",
+        "search web",
         # Modes / safety
         "batch on", "batch off",
         "dry-run on", "dry-run off",
@@ -4406,7 +4379,7 @@ def build_completer():
         "git debug upload", "git debug update",
         "git open",
         # Path index
-        "/qfind", "/qcount", "/qbuild",
+        "/find", "/qcount", "/build",
         # Java
         "java list", "java version", "java change", "java reload",
         # AI

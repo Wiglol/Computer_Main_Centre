@@ -11,8 +11,8 @@
 - **Macros & aliases** — save and chain commands with commas: `macro add deploy = git upload, status`
 - **Safe execution modes** — Dry-Run previews commands without running them; Batch skips all confirmations
 - **Java version switching** — `java list`, `java change 21` (with automatic UAC elevation if needed)
-- **Fast global file search** — index your drives with `/qbuild` then search with `/qfind`
-- **Download helpers** — `download`, `youtube`, `search web`
+- **Fast global file search** — index your drives with `/build` then search with `/find`
+- **Download helpers** — `download`, `search web`
 - **Project setup tools** — `projectsetup`, `websetup`, `webcreate`
 
 ---
@@ -35,10 +35,10 @@ Download from https://python.org/downloads — check **"Add Python to PATH"** du
 Download or clone this repository anywhere on your system.
 
 **3. (Optional) Set up the AI**
-Install [Ollama](https://ollama.com/download), then run `scripts/CMC_AI_Ollama_Setup.cmd` to download a model.
+Install [Ollama](https://ollama.com/download), then run `CMC_AI_Ollama_Setup.cmd` to download a model.
 
 **4. Launch CMC**
-Double-click `scripts/Start_CMC.vbs`
+Double-click `Start_CMC.vbs`
 
 ---
 
@@ -111,5 +111,4 @@ Full command references are in the `manuals/` folder:
 
 - CMC is for local use — not remote execution
 - Git operations respect `.gitignore` rules
-- Empty folders are not tracked by Git (Git limitation)
 - CMC updates itself: `cmc update check` / `cmc update`
