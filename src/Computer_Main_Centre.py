@@ -2593,6 +2593,12 @@ def handle_command(s: str):
         if cmd == "set" and len(parts) >= 4:
             key = parts[2]
             raw_value = " ".join(parts[3:])
+            # Validate key exists in DEFAULT_CONFIG
+            test = get_config_value(DEFAULT_CONFIG, key, default="__missing__")
+            if test == "__missing__":
+                p(f"[red]❌ Unknown config key:[/red] {key}")
+                p("[dim]Use config list to see valid keys.[/dim]")
+                return
             value = parse_value(raw_value)
             old_cfg = dict(CONFIG)
             CONFIG = set_config_value(CONFIG, key, value)
