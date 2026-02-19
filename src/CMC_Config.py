@@ -50,6 +50,19 @@ def _get_config_path(base_dir: Path | None = None) -> Path:
     return base_dir / "CMC_Config.json"
 
 
+def _deep_strip(data: Dict[str, Any], template: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove keys from data that don't exist in template (strips legacy/unknown keys)."""
+    out = {}
+    for k, v in data.items():
+        if k not in template:
+            continue  # drop unknown key
+        if isinstance(v, dict) and isinstance(template[k], dict):
+            out[k] = _deep_strip(v, template[k])
+        else:
+            out[k] = v
+    return out
+
+
 def _deep_update(base: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(base)
     for k, v in updates.items():
@@ -76,7 +89,8 @@ def load_config(base_dir: Path | None = None) -> Dict[str, Any]:
         except Exception:
             # Ignore parse errors; use empty + defaults
             cfg = {}
-    merged = _deep_update(DEFAULT_CONFIG, cfg)
+    stripped = _deep_strip(cfg, DEFAULT_CONFIG)  # drop any unknown/legacy keys
+    merged = _deep_update(DEFAULT_CONFIG, stripped)
     return merged
 
 
