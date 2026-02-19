@@ -32,6 +32,15 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "auto_ai": False,
         "auto_report": False,
     },
+    "git": {
+        "open_browser": True,   # open GitHub in browser after upload/update
+    },
+    "header": {
+        "show_update": True,    # show ● CMC up to date line in header
+    },
+    "prompt": {
+        "show_path": True,      # show full path in prompt (false = folder name only)
+    },
 }
 
 

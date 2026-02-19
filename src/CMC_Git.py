@@ -40,6 +40,18 @@ from typing import Callable, Optional, Tuple, Union, List
 
 PFunc = Callable[[str], None]
 
+def _git_open_browser() -> bool:
+    """Read git.open_browser from CMC config. Defaults to True."""
+    try:
+        import json as _json
+        cfg_path = Path(__file__).parent / "CMC_Config.json"
+        if cfg_path.exists():
+            data = _json.loads(cfg_path.read_text(encoding="utf-8"))
+            return bool(data.get("git", {}).get("open_browser", True))
+    except Exception:
+        pass
+    return True
+
 GIT_CFG = Path.home() / ".ai_helper" / "github.json"
 GIT_CFG.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1200,7 +1212,8 @@ def handle_git_commands(raw: str, low: str, cwd: Union[str, Path], p: PFunc, RIC
         if rc == 0:
             _remember_repo(root, ident.username, repo_name, remote)
             p(f"✅ Uploaded: https://github.com/{ident.username}/{repo_name} ({'public' if public else 'private'})")
-            webbrowser.open_new_tab(f"https://github.com/{ident.username}/{repo_name}")
+            if _git_open_browser():
+                webbrowser.open_new_tab(f"https://github.com/{ident.username}/{repo_name}")
         else:
             p(f"[red]❌ Push failed:[/red]\n{out}")
         return True
@@ -1270,7 +1283,8 @@ def handle_git_commands(raw: str, low: str, cwd: Union[str, Path], p: PFunc, RIC
             web = _remote_web_url(remote)
             if web:
                 p(f"✅ Updated: {web}")
-                webbrowser.open_new_tab(web)
+                if _git_open_browser():
+                    webbrowser.open_new_tab(web)
             else:
                 p("✅ Updated.")
         else:
@@ -1333,7 +1347,8 @@ def handle_git_commands(raw: str, low: str, cwd: Union[str, Path], p: PFunc, RIC
                 _remember_repo(root, ident.username, repo_name, remote)
                 web = f"https://github.com/{ident.username}/{repo_name}"
                 p(f"✅ Force uploaded: {web}")
-                webbrowser.open_new_tab(web)
+                if _git_open_browser():
+                    webbrowser.open_new_tab(web)
             return True
 
         # ---- force/debug update ----
@@ -1402,7 +1417,8 @@ def handle_git_commands(raw: str, low: str, cwd: Union[str, Path], p: PFunc, RIC
                 web = _remote_web_url(remote)
                 if web:
                     p(f"✅ Force updated: {web}")
-                    webbrowser.open_new_tab(web)
+                    if _git_open_browser():
+                        webbrowser.open_new_tab(web)
                 else:
                     p("✅ Force updated.")
             return True

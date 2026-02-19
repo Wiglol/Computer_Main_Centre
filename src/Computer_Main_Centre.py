@@ -439,6 +439,8 @@ def show_header():
     batch_val = "[yellow]ON[/yellow]" if STATE["batch"] else "[dim]off[/dim]"
     dry_val   = "[yellow]ON[/yellow]" if STATE["dry_run"] else "[dim]off[/dim]"
 
+    show_update = get_config_value(CONFIG, "header.show_update", True)
+
     upd = STATE.get("cmc_update_status", "unknown")
     if upd == "up_to_date":
         update_line = "[green]●[/green] CMC up to date"
@@ -452,11 +454,13 @@ def show_header():
         update_line = "[dim]●[/dim] CMC status unknown"
 
     sep = "[dim] │ [/dim]"
-    lines = [
+    header_lines = [
         "[bold cyan]Computer Main Centre[/bold cyan]  [dim]— local command console[/dim]",
         f"[cyan]Batch:[/cyan] {batch_val}{sep}[cyan]Dry-Run:[/cyan] {dry_val}{sep}[cyan]AI:[/cyan] {ai_model} ({ai_status})",
-        f"{update_line}",
     ]
+    if show_update:
+        header_lines.append(update_line)
+    lines = header_lines
     content = "\n".join(lines)
 
     if RICH:
@@ -2157,7 +2161,8 @@ def op_timer(delay, action=None):
         """Thread-safe print that keeps cursor and color consistent."""
         sys.stdout.write(f"\n{msg}\n")
         # Carriage return resets line start, print bright cyan prompt
-        sys.stdout.write(f"\r\033[1;96mCMC>{CWD}> \033[0m")
+        _bg_path = str(CWD) if get_config_value(CONFIG, "prompt.show_path", True) else CWD.name
+        sys.stdout.write(f"\r\033[1;96mCMC>{_bg_path}> \033[0m")
         sys.stdout.flush()
 
     def _trigger():
@@ -4596,8 +4601,10 @@ def main():
             # On the very first prompt ever, pre-fill "help" so the user just hits Enter
             prompt_default = "help" if first_run else ""
             first_run = False   # only pre-fill once
+            _show_path = get_config_value(CONFIG, "prompt.show_path", True)
+            _prompt_path = str(CWD) if _show_path else CWD.name
             line = session.prompt(
-                f"CMC>{CWD}> ",
+                f"CMC>{_prompt_path}> ",
                 completer=completer,
                 complete_while_typing=True,
                 style=style,
