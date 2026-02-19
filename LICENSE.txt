@@ -1,0 +1,38 @@
+Copyright (c) 2025 Wiglo. All Rights Reserved.
+
+This software and all associated files, including source code, documentation, manuals, scripts, configuration files, installers, AI models, and any derivative materials (collectively, the “Software”), are the exclusive property of the copyright holder.
+
+1. Grant of Use
+
+You are granted a non-exclusive, non-transferable license to use the Software for personal, non-commercial purposes only.
+
+No other rights are granted unless explicitly stated in writing by the copyright holder.
+
+2. Restrictions
+
+Without written permission from the copyright holder, you may NOT:
+
+Copy, distribute, publish, or share the Software
+
+Modify, edit, or create derivative works
+
+Sell, rent, lease, sublicense, or commercialize the Software
+
+Upload or host the Software publicly (including GitHub or any repository)
+
+Use any part of the Software in your own applications or products
+
+Reverse-engineer, decompile, or attempt to extract any protected components
+
+Remove or alter copyright notices
+
+Any unauthorized use constitutes copyright infringement.
+
+3. Commercial Use
+
+Commercial use of any part of the Software—including bundling, reselling, paid services, or integration into commercial products—is strictly prohibited without a separate commercial license agreement signed by the copyright holder.
+
+4. Ownership
+
+All rights, title, and interest in the Software remain with the copyright holder.
+No rights or licenses are granted by implication, estoppel, or
