@@ -1,175 +1,115 @@
 # Computer Main Centre (CMC)
-### Local Command Console for Windows  
-
-CMC is a **local automation console** for Windows that combines powerful tools into a single, consistent command environment:
-
-- File management  
-- GitHub publishing  
-- Macros & automation  
-- Java version management  
-- Quick path indexing & search  
-- Web project setup tools  
-- Download helpers  
-- Safe execution modes  
-- A fully embedded **local AI assistant** powered by **Ollama**
-
-CMC is designed to make your Windows workflow **faster, safer, and smarter**, while remaining **fully offline-capable**.
+**A local command console for Windows** — file management, Git publishing, AI assistance, macros, and more in one place.
 
 ---
 
-## 🚀 Features
+## Highlights
 
-### 🟦 Core Console Capabilities
-- Full file operations: create, read, move, delete, zip, unzip  
-- Safe execution modes: **Dry-Run**, **Batch**, **SSL toggle**  
-- Persistent macros & aliases  
-- Fast global file search with `/qbuild`, `/qfind`, `/find`  
-- Command autocompletion  
-- Simplified GitHub publishing (`git upload`, `git update`)  
-- Java version switching (`java list`, `java change`, `java reload`)  
-- Download helpers (`download`, `download_list`, `youtube`, `search web`)  
-- Project setup tools (`projectsetup`, `websetup`, `webcreate`)  
-- Script & program execution with correct working directories  
+- **Git integration** — push, pull, clone, status, and more with simple commands like `git upload` and `git update`
+- **Embedded AI assistant** — ask questions, get valid CMC commands, fix errors automatically. Runs fully offline via Ollama
+- **Undo system** — undo almost any action (delete, move, copy, write, macros, aliases, config) up to 30 steps
+- **Macros & aliases** — save and chain commands with commas: `macro add deploy = git upload, status`
+- **Safe execution modes** — Dry-Run previews commands without running them; Batch skips all confirmations
+- **Java version switching** — `java list`, `java change 21` (with automatic UAC elevation if needed)
+- **Fast global file search** — index your drives with `/qbuild` then search with `/qfind`
+- **Download helpers** — `download`, `youtube`, `search web`
+- **Project setup tools** — `projectsetup`, `websetup`, `webcreate`
 
 ---
 
-## 🤖 AI Features (Offline)
+## Requirements
 
-CMC includes a built-in AI assistant using **Ollama**:
-
-ai <your question>
-
-markdown
-Copy code
-
-The assistant:
-
-- Runs **fully offline**
-- Generates **valid CMC commands**
-- Uses correct single-quoted paths
-- Creates macros & automation
-- Explains commands and workflows
-- Respects safety modes (Dry-Run, Batch)
-- Reads `CMC_AI_Manual-MEDIUM.md` as its knowledge base
-
-The AI is designed to **assist**, not take control.
+- Windows 10 / 11
+- Python 3.10+
+- [Git for Windows](https://git-scm.com/) — for Git features
+- [Ollama](https://ollama.com/download) — for the AI assistant (optional)
 
 ---
 
-## 🧰 Requirements
+## Installation
 
-- Windows 10 or Windows 11  
-- Python 3.10+  
-- Git for Windows (for GitHub features)  
-- Ollama (for AI mode): https://ollama.com/download  
+**1. Install Python**
+Download from https://python.org/downloads — check **"Add Python to PATH"** during install.
 
-> Internet access is only required for installation.  
-> **CMC and AI mode work fully offline after setup.**
-
----
-
-## 🛠 Installation
-
-### 1️⃣ Install Python  
-Download from https://python.org/downloads  
-✔ Check **“Add Python to PATH”** during installation.
-
-### 2️⃣ Install Ollama  
-Download from https://ollama.com/download  
-Run it once to initialize the service.
-
-### 3️⃣ Get CMC  
+**2. Get CMC**
 Download or clone this repository anywhere on your system.
 
-### 4️⃣ Set up the AI model  
-Inside the CMC folder, run:
+**3. (Optional) Set up the AI**
+Install [Ollama](https://ollama.com/download), then run `scripts/CMC_AI_Ollama_Setup.cmd` to download a model.
 
-CMC_AI_Ollama_Setup.cmd
-
-markdown
-Copy code
-
-This script will:
-
-- Detect Ollama
-- Download `qwen2.5:7b-instruct`
-- Configure the model automatically
-- Prepare AI mode for use
-
-### 5️⃣ Launch CMC  
-Double-click:
-
-Start_CMC.vbs
-
-yaml
-Copy code
-
-This will:
-- Start Ollama silently (if needed)
-- Launch the CMC console
+**4. Launch CMC**
+Double-click `scripts/Start_CMC.vbs`
 
 ---
 
-## 🤖 Using the AI Assistant
+## Git Integration
 
-Examples:
+CMC makes GitHub publishing straightforward:
 
-ai test
+```
+git upload          push local changes to GitHub (stages, commits, pushes)
+git update          pull latest changes from GitHub
+git download        clone a repo into the current folder
+git link            connect the current folder to an existing GitHub repo
+git status          show branch, staged/unstaged changes
+git log             recent commit history
+git doctor          diagnose common git problems
+```
+
+---
+
+## AI Assistant
+
+The AI runs locally via Ollama — no internet required after setup.
+
+```
 ai how do I zip this folder?
-ai create a macro that backs up this project
-ai only output the command to create a new folder on Desktop
+ai create a macro that backs up my project
+ai fix                          diagnose and explain the last failed command
+ai clear                        reset conversation history
+```
 
-yaml
-Copy code
+The assistant sees your current folder, recent command log, macros, aliases, and active flags — so answers are specific to your session. Answers are short by default; ask for more detail if needed.
 
-The assistant:
-- Gives short, useful answers
-- Outputs valid CMC commands
-- Avoids unsafe operations
-- Respects your current working directory
-
----
-
-## 📚 Manuals
-
-### CMC_AI_Manual_MINI.md
-Compact, AI-optimized manual used by the embedded assistant.
-
-### CMC_AI_Manual_MEDIUM.md
-Full documentation for advanced users or external AI tools.
+**Models** (switch with `ai-model set <model>`):
+| Model | Size | Use |
+|---|---|---|
+| `llama3.1:8b` | ~5 GB | Fast, everyday tasks (default) |
+| `qwen2.5:14b-instruct` | ~9 GB | More capable, better reasoning |
 
 ---
 
-## ✔ Notes & Limitations
+## Macros & Aliases
 
+```
+macro add backup = git upload, status     chain commands with commas
+macro run backup
+macro list
+alias add gs = git status
+```
+
+---
+
+## Safety
+
+- **`dry-run on`** — preview what a command would do, nothing actually runs
+- **`batch on`** — skip all confirmation prompts (use carefully)
+- **`undo`** — undo the last action; supports delete, move, copy, write, create, macros, aliases, config. Up to 30 steps.
+- **`status`** — see all active modes, AI model, Java version, CMC update status, macro/alias counts, undo depth
+
+---
+
+## Manuals
+
+Full command references are in the `manuals/` folder:
+- `CMC_AI_Manual_MINI.md` — compact reference used by the light AI model
+- `CMC_AI_Manual_MEDIUM.md` — full reference used by the heavy AI model
+
+---
+
+## Notes
+
+- CMC is for local use — not remote execution
+- Git operations respect `.gitignore` rules
 - Empty folders are not tracked by Git (Git limitation)
-- `.gitignore` rules are always respected
-- GitHub repository deletion affects GitHub only (local files stay intact)
-- CMC is designed for **local use**, not remote execution
-
----
-
-## 🛠 Troubleshooting
-
-- Ensure Python is installed and on PATH  
-- Ensure Ollama is running  
-- Re-run setup if needed:
-
-CMC_AI_Ollama_Setup.cmd
-
-yaml
-Copy code
-
----
-
-## 📌 Philosophy
-
-CMC is built around:
-- **Safety first**
-- **Explicit commands**
-- **No hidden automation**
-- **Offline-friendly tooling**
-
-If a command runs, it’s because *you* told it to.
-
----
+- CMC updates itself: `cmc update check` / `cmc update`
