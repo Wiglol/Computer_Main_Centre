@@ -32,9 +32,6 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "auto_ai": False,
         "auto_report": False,
     },
-    "ai": {
-        "verbose": False,
-    },
 }
 
 
