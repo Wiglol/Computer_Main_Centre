@@ -2549,7 +2549,6 @@ def handle_command(s: str):
                 "  config reset\n\n"
                 "Examples:\n"
                 "  config set batch on\n"
-                "  config set ai.verbose on\n"
                 "  config set space.default_depth 3\n"
             )
             return
@@ -4069,7 +4068,7 @@ Examples:
   ssl off
   config list
   config set batch on
-  config get ai.verbose
+  config get space.default_depth
 """
 
     sec14 = """
