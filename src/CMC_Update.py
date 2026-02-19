@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 import subprocess
 
 # Change this if your “official update source” repo changes
-DEFAULT_REPO = "Wiglol/Computer-Main-Centre-Public"
+DEFAULT_REPO = "Wiglol/Computer_Main_Centre"
 DEFAULT_BRANCH = "main"
 
 DATA_DIR = Path.home() / ".ai_helper"
