@@ -197,9 +197,10 @@ LOG = []    # list of strings
 
 # ---------- Config (persistent settings) ----------
 try:
-    from CMC_Config import load_config, save_config, apply_config_to_state
+    from CMC_Config import load_config, save_config, apply_config_to_state, get_config_value
 except Exception:
     load_config = save_config = apply_config_to_state = None  # type: ignore
+    def get_config_value(config, key, default=None): return default  # type: ignore
 
 CONFIG = {}
 try:
