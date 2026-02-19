@@ -1,29 +1,51 @@
-Computer Main Centre - Release Notes (27/01/2026)
+Computer Main Centre - Release Notes (19/02/2026)
 
-[ AI / File Access ]
+[ Header & Status ]
 
-- Removed all Observer-related code and endpoints
+- Header is now compact and minimal — shows Batch, Dry-Run, AI model, and CMC update status
+- SSL and Java version moved out of the header and into the 'status' command
+- 'status' command now shows a full panel: all modes, AI model, Java, CMC update, macro/alias counts, and undo depth
+- CMC update status now checks in the background on startup so the console opens instantly
+- Update check now works for zip installs (no longer requires a .git folder)
 
-- AI no longer has direct filesystem/Observer access
+[ First-Time Welcome ]
 
-- AI now operates only through available CMC commands and user-provided context
+- First launch shows a welcome panel and pre-fills 'help' in the prompt
+- Only appears once, never shown again after that
 
-[ Header / Status ]
+[ AI Assistant ]
 
-- Added active AI model display to the header/status box (example: AI: qwen2.5:7b-instruct)
+- AI now sees the full body of your macros and aliases, not just their names
+- Added conversation history — follow-up questions work within a session
+- Added 'ai fix' — automatically diagnoses the last failed command
+- Added 'ai clear' — resets conversation history
+- AI answers are short by default; ask for more detail if needed
+- Switched to llama3.1:8b (light) and qwen2.5:14b-instruct (heavy) models
 
-[ Help / Docs ]
+[ Undo ]
 
-- Added a new Help section: AI models & commands
+- Undo now works on almost everything: file delete (recoverable via trash), copy,
+  create file/folder, write (restores old content), macro add/delete/clear,
+  alias add/delete, config set/reset
+- Undo history keeps up to 30 steps
 
-[ GitHub / Git Helpers ]
+[ Macros ]
 
-- Added Git “force/debug” style helpers to recover from common failures automatically
+- Commands now chain with commas:  macro add backup = pwd, list, git update
+- Macro list display has clear row separators
 
-- Improved reliability for messy states (wrong branch/upstream/origin, missing main, etc.)
+[ Java ]
 
-- Better debug output when something still fails (so you can actually diagnose it)
+- 'java change' now updates both JAVA_HOME and the user Path in the registry
+- Prompts for UAC elevation if system-level changes are needed
 
-[ Default .gitignore ]
+[ Project Structure ]
 
-- Updated the default .gitignore CMC generates to be more general-purpose and safer
+- All Python source files moved into src/ folder
+- Manuals moved into manuals/ folder
+- Root folder now contains only Start_CMC.vbs, README, setup script, and config files
+
+[ Removed ]
+
+- Observer system fully removed (it never worked)
+- Broken commands removed from help and manuals: whereami, ls, dir, head, tail, count, shell

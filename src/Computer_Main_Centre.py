@@ -516,7 +516,7 @@ def maybe_show_update_notes():
             seen_file.write_text(version, encoding="utf-8")
             return
 
-        title = f"What's new in CMC ({version})"
+        title = "What's new in CMC"
 
         if RICH:
             console.print(Panel.fit(text, title=title, border_style="cyan"))
