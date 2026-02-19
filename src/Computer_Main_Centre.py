@@ -3614,10 +3614,9 @@ def show_help(topic: str | None = None) -> None:
 -----------------------------------
 
 Movement:
-• cd '<path>'                     Change directory (quoted)
-• cd <path>                       Change directory (unquoted)
-• cd ..  or  ..                   Go up one folder
-• cd  or  cd ~                    Go to HOME
+• cd <path>                       Change directory
+• cd ..                           Go up one folder
+• cd                              Go to HOME
 • home                            Go to HOME (explicit)
 • back                            Go to previous directory
 • list                            List current folder
@@ -3628,7 +3627,7 @@ Opening:
 • explore '<folder>'              Open folder in Explorer
 
 Examples:
-  cd 'C:/Users/Wiggo/Desktop'
+  cd C:/Users/Wiggo/Desktop
   cd ..
   list
   pwd
