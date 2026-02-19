@@ -2844,6 +2844,15 @@ def handle_command(s: str):
         p(f"[red]❌ Git module error:[/red] {e}")
         return
 
+    # ---------- Docker commands ----------
+    try:
+        from CMC_Docker import handle_docker_commands
+        if handle_docker_commands(s, low, CWD, p):
+            return
+    except Exception as e:
+        p(f"[red]❌ Docker module error:[/red] {e}")
+        return
+
     
     
     # ---------- Project Scan ----------
@@ -4063,6 +4072,70 @@ Examples:
   config get ai.verbose
 """
 
+    sec14 = """
+[bold]14. Docker[/bold]
+-----------------------------------
+
+Containers:
+• docker ps                        List running containers
+• docker ps all                    List all containers (including stopped)
+• docker start <name>              Start a stopped container
+• docker stop <name>               Stop a running container
+• docker restart <name>            Restart a container
+• docker remove <name>             Stop + remove a container in one step
+• docker shell <name>              Open interactive shell inside container
+• docker logs <name>               Show last 50 log lines
+• docker logs follow <name>        Stream logs live (Ctrl+C to stop)
+• docker stats                     Live CPU/memory for all containers
+• docker stats <name>              Live stats for one container
+• docker inspect <name>            Show container or image details
+• docker ip <name>                 Show container IP address
+
+Images:
+• docker images                    List local images
+• docker pull <image>              Pull image from Docker Hub
+• docker push <image>              Push image to registry
+• docker build <tag>               Build image from Dockerfile in current folder
+• docker build <tag> <path>        Build image from Dockerfile at path
+
+Run:
+• docker run <image>               Run interactively (removed on exit)
+• docker run <image> -d            Run in background (detached)
+• docker run <image> -p 8080:80    Map port host:container
+• docker run <image> -e KEY=VAL    Set environment variable
+• docker run <image> -n myname     Assign a name
+
+Compose (run from folder with docker-compose.yml):
+• docker compose up                Build and start all services in background
+• docker compose down              Stop and remove all services
+• docker compose logs              Show last 50 lines from all services
+• docker compose logs follow       Stream logs live
+• docker compose build             Rebuild all images (no cache)
+• docker compose ps                List compose services and their status
+• docker compose restart           Restart all services
+
+Volumes & Networks:
+• docker volumes                   List volumes
+• docker volume remove <name>      Remove a volume
+• docker networks                  List networks
+• docker network remove <name>     Remove a network
+
+Cleanup:
+• docker clean                     Remove stopped containers + dangling images
+• docker clean all                 Full system prune (containers, images, volumes, networks)
+
+• docker doctor                    Check Docker installation and daemon status
+
+Examples:
+  docker ps
+  docker shell myapp
+  docker logs follow myapp
+  docker build myapp:v1
+  docker run nginx -p 8080:80 -d
+  docker compose up
+  docker clean
+"""
+
     # ---------- Section Map ----------
     sections = {
         "1": ("Basics & navigation", sec1),
@@ -4078,6 +4151,7 @@ Examples:
         "11": ("Project & web setup", sec11),
         "12": ("AI models & commands", sec12),
         "13": ("Flags & modes", sec13),
+        "14": ("Docker", sec14),
     }
 
     # ---------- Aliases ----------
@@ -4097,6 +4171,7 @@ Examples:
         "ai": "12", "model": "12", "models": "12", "ollama": "12",
         "flags": "13", "mode": "13", "modes": "13",
         "batch": "13", "ssl": "13", "dry-run": "13",
+        "docker": "14", "container": "14", "containers": "14", "compose": "14",
     }
 
     # ---------- No topic: Show menu ----------
@@ -4117,6 +4192,7 @@ Type `help <number>` to open a section or use: help all
  11. Project & web setup
  12. AI models & commands
  13. Flags & modes
+ 14. Docker
 
 """
         _panel("CMC Help – categories", menu)
@@ -4258,6 +4334,19 @@ def complete_command(text, state):
     "/gitlog", "/gitbranch", "/gitignore add", "/gitclean", "/gitdoctor",
     "/gitfix", "/gitlfs setup",
 
+    # Docker
+    "docker ps", "docker ps all", "docker images",
+    "docker start", "docker stop", "docker restart", "docker remove",
+    "docker shell", "docker logs", "docker logs follow",
+    "docker stats", "docker inspect", "docker ip",
+    "docker build", "docker pull", "docker push", "docker run",
+    "docker volumes", "docker volume remove",
+    "docker networks", "docker network remove",
+    "docker clean", "docker clean all",
+    "docker compose up", "docker compose down", "docker compose logs",
+    "docker compose build", "docker compose ps", "docker compose restart",
+    "docker doctor",
+
     # Path index
     "/find", "/qcount", "/build",
 
@@ -4389,6 +4478,19 @@ def build_completer():
         "git force upload", "git force update",
         "git debug upload", "git debug update",
         "git open",
+        # Docker
+        "docker ps", "docker ps all", "docker images",
+        "docker start", "docker stop", "docker restart", "docker remove",
+        "docker shell", "docker logs", "docker logs follow",
+        "docker stats", "docker inspect", "docker ip",
+        "docker build", "docker pull", "docker push", "docker run",
+        "docker volumes", "docker volume remove",
+        "docker networks", "docker network remove",
+        "docker clean", "docker clean all",
+        "docker compose up", "docker compose down", "docker compose logs",
+        "docker compose logs follow", "docker compose build",
+        "docker compose ps", "docker compose restart",
+        "docker doctor",
         # Path index
         "/find", "/qcount", "/build",
         # Java
@@ -4432,7 +4534,7 @@ def build_completer():
 
 
 # create a prompt session
-session = PromptSession(mouse_support=True)
+session = PromptSession()
 
 # 🎨 CMC cyan theme style
 style = Style.from_dict({
