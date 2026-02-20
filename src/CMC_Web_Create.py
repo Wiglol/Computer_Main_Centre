@@ -741,7 +741,7 @@ def op_web_create() -> None:
         "* `client/` – frontend (if chosen)\n"
         "* `server/` – backend (if chosen)\n"
         "\n"
-        "You can run `websetup` later inside client/ or server/ to refine the setup.\n",
+        "Use `setup` inside client/ or server/ to install deps and get running.\n",
         encoding="utf-8",
     )
 
@@ -749,7 +749,7 @@ def op_web_create() -> None:
     print("-" * 60)
     print("Done!")
     print("You can now open the project folder and start hacking.")
-    print("Tip: run 'websetup' inside client/ or server/ later to refine the setup.")
+    print("Tip: run 'setup' inside client/ or server/ to install deps and start the server.")
     print("-" * 60)
 
 

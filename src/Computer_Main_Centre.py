@@ -70,7 +70,10 @@ ensure_packages()
 import os, sys, re, glob, fnmatch, shutil, zipfile, subprocess, datetime, time, json, threading
 from pathlib import Path
 from urllib.parse import urlparse
-from CMC_Web_Create import op_web_create
+from CMC_Web_Create import op_web_create  # used by handle_new "web"
+from CMC_Scaffold import (
+    handle_setup, handle_new, handle_dev, handle_env,
+)
 import webbrowser, urllib.parse
 
 # --- GitHub config path ---
@@ -446,7 +449,7 @@ def show_header():
     if upd == "up_to_date":
         update_line = "[green]●[/green] CMC up to date"
     elif upd == "update_available":
-        update_line = "[yellow]●[/yellow] CMC update available"
+        update_line = "[yellow]●[/yellow] [bold yellow]CMC update available[/bold yellow]  [dim]→ run:[/dim] [cyan]cmc update[/cyan]"
     elif upd == "diverged":
         update_line = "[red]●[/red] CMC has local changes"
     elif upd == "checking":
@@ -1078,9 +1081,11 @@ def op_find_name(name):
     base = Path.cwd()
     results = [str(fp) for fp in base.rglob("*") if name.lower() in fp.name.lower()]
     if results:
-        p(f"[cyan]🔎 Found {len(results)} match(es):[/cyan]")
+        p(f"[cyan]🔎 Found {len(results)} match(es) for '{name}':[/cyan]")
         for r in results[:20]:
             p(f"  {r}")
+        if len(results) > 20:
+            p(f"[dim]...and {len(results) - 20} more.[/dim]")
     else:
         p(f"[yellow]No matches for '{name}'.[/yellow]")
 
@@ -2486,6 +2491,112 @@ def macro_clear():
     p("[green]✅ Cleared all macros.[/green]")
 
 
+def macro_edit(name: str):
+    """Open a macro body in a pre-filled prompt_toolkit input for editing."""
+    if name not in MACROS:
+        p(f"[yellow]No such macro:[/yellow] {name}"); return
+    old_body = MACROS[name]
+    p(f"[cyan]Editing macro:[/cyan] {name}")
+    p("[dim]Edit the command below and press Enter to save, or Ctrl+C to cancel.[/dim]")
+    try:
+        from prompt_toolkit import PromptSession as _PS
+        from prompt_toolkit.history import InMemoryHistory as _IMH
+        _sess = _PS(history=_IMH())
+        new_body = _sess.prompt("  > ", default=old_body).strip()
+    except KeyboardInterrupt:
+        p("[yellow]Edit cancelled.[/yellow]"); return
+    except Exception:
+        # Fallback: plain input pre-filled with old value shown as hint
+        print(f"  Current: {old_body}")
+        try:
+            new_body = input("  New value (Enter to keep): ").strip()
+            if not new_body:
+                new_body = old_body
+        except KeyboardInterrupt:
+            p("[yellow]Edit cancelled.[/yellow]"); return
+    if new_body == old_body:
+        p("[dim]No changes made.[/dim]"); return
+    MACROS[name] = new_body
+    macros_save(MACROS)
+    push_undo("macro_add", name=name, old_val=old_body)
+    log_action(f"MACRO EDIT {name} = {new_body}")
+    p(f"[green]✅ Macro updated:[/green] {name} = {new_body}")
+
+
+# ===========================================================================
+# ── PORTS  (show open ports / kill a port)
+# ===========================================================================
+
+def _get_listening_ports() -> list:
+    """Return list of dicts: {port, pid, name} for all LISTENING TCP ports."""
+    import psutil
+    rows = []
+    try:
+        seen = set()
+        for conn in psutil.net_connections(kind="inet"):
+            if conn.status == "LISTEN" and conn.laddr:
+                port = conn.laddr.port
+                pid  = conn.pid or 0
+                if port in seen:
+                    continue
+                seen.add(port)
+                name = ""
+                if pid:
+                    try:
+                        name = psutil.Process(pid).name()
+                    except Exception:
+                        name = "?"
+                rows.append({"port": port, "pid": pid, "name": name})
+    except Exception:
+        pass
+    return sorted(rows, key=lambda r: r["port"])
+
+
+def op_ports(p) -> None:
+    """Show all listening ports with PID and process name."""
+    rows = _get_listening_ports()
+    if not rows:
+        p("[yellow]No listening ports found (try running as admin for full list).[/yellow]")
+        return
+    if RICH:
+        from rich.table import Table as _T
+        t = _T(title="Open Ports", show_lines=False, border_style="cyan")
+        t.add_column("Port",    style="bold cyan", justify="right")
+        t.add_column("PID",     style="dim",       justify="right")
+        t.add_column("Process", style="green")
+        for r in rows:
+            t.add_row(str(r["port"]), str(r["pid"]) if r["pid"] else "—", r["name"] or "—")
+        console.print(t)
+    else:
+        print(f"{'PORT':<8} {'PID':<8} PROCESS")
+        for r in rows:
+            print(f"{r['port']:<8} {r['pid']:<8} {r['name']}")
+    p(f"[dim]{len(rows)} port(s) listening.[/dim]")
+
+
+def op_kill_port(port: int, p) -> None:
+    """Kill the process listening on a given port."""
+    import psutil
+    killed = []
+    try:
+        for conn in psutil.net_connections(kind="inet"):
+            if conn.status == "LISTEN" and conn.laddr and conn.laddr.port == port and conn.pid:
+                try:
+                    proc = psutil.Process(conn.pid)
+                    name = proc.name()
+                    proc.kill()
+                    killed.append(f"{name} (PID {conn.pid})")
+                except Exception as exc:
+                    p(f"[red]Could not kill PID {conn.pid}:[/red] {exc}")
+    except Exception as exc:
+        p(f"[red]Error scanning ports:[/red] {exc}")
+        return
+    if killed:
+        p(f"[green]✅ Killed on port {port}:[/green] {', '.join(killed)}")
+    else:
+        p(f"[yellow]Nothing listening on port {port}.[/yellow]")
+
+
 # ---------- Suggestions for partial commands ----------
 COMMAND_HINTS = [
     "pwd","cd","back","home","list","info","find","findext","recent","biggest","search",
@@ -2493,7 +2604,14 @@ COMMAND_HINTS = [
     "zip","unzip","open","explore","backup","run",
     "download","downloadlist","open url",
     "batch on","batch off","dry-run on","dry-run off","ssl on","ssl off","status","log","undo",
-    "macro add <name> = <commands>","macro run <name>","macro list","macro delete <name>","macro clear","help","exit", "search web <query>","webcreate",
+    "macro add <name> = <commands>","macro run <name>","macro edit <name>","macro list","macro delete <name>","macro clear","help","exit", "search web <query>",
+    "ports","kill",
+    # Scaffolding & dev tools
+    "setup",
+    "new python","new node","new flask","new fastapi","new react","new vue","new svelte",
+    "new next","new electron","new discord","new cli","new web",
+    "dev","dev stop",
+    "env list","env show","env get","env set","env delete","env template","env check",
 ]
 
 def suggest_commands(s: str):
@@ -2514,7 +2632,7 @@ def suggest_commands(s: str):
 
 # ---------- Main command handler ----------
 def handle_command(s: str):
-    global Path, p  # ✅ ensure we always use the global versions
+    global Path, p, CONFIG  # ✅ ensure we always use the global versions
 
     # --- Runtime Path fix (safest minimal form) ---
     import pathlib, builtins
@@ -2544,6 +2662,28 @@ def handle_command(s: str):
         )
         global CONFIG
 
+        # ------------------------------------------------------------------
+        # Flat short-name aliases → full dotted key
+        # Lets users type e.g. "config set show_update false" instead of
+        # "config set header.show_update false".
+        # ------------------------------------------------------------------
+        _CONFIG_ALIASES: dict = {
+            "batch":          "batch",
+            "dry_run":        "dry_run",
+            "ssl_verify":     "ssl_verify",
+            "ai_model":       "ai.model",
+            "open_browser":   "git.open_browser",
+            "show_update":    "header.show_update",
+            "show_path":      "prompt.show_path",
+            "default_depth":  "space.default_depth",
+            "auto_ai":        "space.auto_ai",
+            "auto_report":    "space.auto_report",
+        }
+
+        def _resolve_config_key(k: str) -> str:
+            """Return the full dotted key, resolving flat aliases."""
+            return _CONFIG_ALIASES.get(k, k)
+
         parts = s.split()
         # Just "config" or "config help"
         if len(parts) == 1 or (len(parts) >= 2 and parts[1].lower() == "help"):
@@ -2553,22 +2693,58 @@ def handle_command(s: str):
                 "  config get <key>\n"
                 "  config set <key> <value>\n"
                 "  config reset\n\n"
+                "Short names (no prefix needed):\n"
+                "  show_update     header.show_update    show ● CMC up to date in header\n"
+                "  show_path       prompt.show_path      show full path in prompt\n"
+                "  ai_model        ai.model              active AI model name\n"
+                "  open_browser    git.open_browser      open GitHub after git upload/update\n"
+                "  default_depth   space.default_depth   default depth for space command\n"
+                "  auto_ai         space.auto_ai         auto-run AI after space scan\n"
+                "  batch           batch                 skip all confirmations\n"
+                "  dry_run         dry_run               preview commands without running\n\n"
                 "Examples:\n"
+                "  config set show_update false\n"
+                "  config set open_browser false\n"
+                "  config set default_depth 3\n"
                 "  config set batch on\n"
-                "  config set space.default_depth 3\n"
             )
             return
 
         cmd = parts[1].lower()
 
-        # config list
+        # config list — show a clean table
         if cmd == "list":
-            import json as _json
-            try:
-                txt = _json.dumps(CONFIG or {}, indent=2, sort_keys=True)
-                p(txt)
-            except Exception:
-                p(CONFIG)
+            if RICH:
+                from rich.table import Table as _Table
+                tbl = _Table(show_header=True, header_style="bold cyan", show_lines=True, box=None)
+                tbl.add_column("Key", style="cyan", no_wrap=True)
+                tbl.add_column("Short name", style="dim", no_wrap=True)
+                tbl.add_column("Value", style="green")
+                tbl.add_column("Default", style="dim")
+                # Build reverse alias map: dotted_key → short_name
+                _rev: dict = {}
+                for short, full in _CONFIG_ALIASES.items():
+                    if full not in _rev:
+                        _rev[full] = short
+                def _flat_items(d: dict, prefix: str = "") -> list:
+                    rows = []
+                    for k, v in sorted(d.items()):
+                        full_key = f"{prefix}.{k}" if prefix else k
+                        if isinstance(v, dict):
+                            rows.extend(_flat_items(v, full_key))
+                        else:
+                            rows.append((full_key, v))
+                    return rows
+                for dotted, def_val in _flat_items(DEFAULT_CONFIG):
+                    cur_val = get_config_value(CONFIG or DEFAULT_CONFIG, dotted, default=def_val)
+                    short = _rev.get(dotted, "")
+                    changed = cur_val != def_val
+                    val_str = f"[bold green]{cur_val}[/bold green]" if changed else str(cur_val)
+                    tbl.add_row(dotted, short, val_str, str(def_val))
+                p(tbl)
+            else:
+                import json as _json
+                p(_json.dumps(CONFIG or {}, indent=2, sort_keys=True))
             return
 
         # config reset
@@ -2583,21 +2759,20 @@ def handle_command(s: str):
 
         # config get <key>
         if cmd == "get" and len(parts) >= 3:
-            key = parts[2]
-            from CMC_Config import get_config_value
+            key = _resolve_config_key(parts[2])
             val = get_config_value(CONFIG, key, default=None)
             p(f"{key} = {val!r}")
             return
 
         # config set <key> <value...>
         if cmd == "set" and len(parts) >= 4:
-            key = parts[2]
+            key = _resolve_config_key(parts[2])
             raw_value = " ".join(parts[3:])
             # Validate key exists in DEFAULT_CONFIG
             test = get_config_value(DEFAULT_CONFIG, key, default="__missing__")
             if test == "__missing__":
                 p(f"[red]❌ Unknown config key:[/red] {key}")
-                p("[dim]Use config list to see valid keys.[/dim]")
+                p("[dim]Use 'config list' to see valid keys, or 'config help' for short names.[/dim]")
                 return
             value = parse_value(raw_value)
             old_cfg = dict(CONFIG)
@@ -2606,7 +2781,7 @@ def handle_command(s: str):
             apply_config_to_state(CONFIG, STATE)
             save_config(CONFIG, Path(__file__).parent)
             push_undo("config_change", old_config=old_cfg)
-            p(f"[green]Config updated:[/green] {key} = {value!r}")
+            p(f"[green]✓[/green] {key} = [bold]{value!r}[/bold]")
             return
 
         p(f"[red]Unknown config command:[/red] {' '.join(parts[1:])}")
@@ -2646,7 +2821,24 @@ def handle_command(s: str):
 
         if sub == "list":
             try:
-                out = subprocess.check_output(["ollama", "list"], stderr=subprocess.STDOUT, text=True)
+                ollama_cmd = shutil.which("ollama") or shutil.which("ollama.exe")
+                if not ollama_cmd:
+                    candidates = [
+                        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe",
+                        Path(os.environ.get("ProgramFiles", "")) / "Ollama" / "ollama.exe",
+                        Path(os.environ.get("ProgramFiles(x86)", "")) / "Ollama" / "ollama.exe",
+                    ]
+                    for cand in candidates:
+                        if str(cand).strip() and cand.exists():
+                            ollama_cmd = str(cand)
+                            break
+
+                if not ollama_cmd:
+                    p("[yellow]Ollama CLI not found.[/yellow] Install Ollama or add it to PATH.")
+                    p("[dim]Then retry: ai-model list[/dim]")
+                    return
+
+                out = subprocess.check_output([ollama_cmd, "list"], stderr=subprocess.STDOUT, text=True)
                 names = []
                 for line in out.splitlines():
                     line = line.strip()
@@ -2677,22 +2869,34 @@ def handle_command(s: str):
                 return
             new_model = parts[2].strip()
 
-            # Update config in-place (no global needed)
+            # Persist model in config on disk (load -> set -> save -> verify)
             try:
-                if not isinstance(CONFIG, dict):
-                    p("[red]CONFIG is not a dict; can't store model setting.[/red]")
-                    return
-                CONFIG.setdefault("ai", {})["model"] = new_model
-            except Exception as e:
-                p(f"[red]Failed to update CONFIG.[/red] {e}")
-                return
+                from CMC_Config import load_config as _cfg_load, save_config as _cfg_save
+                cfg_dir = Path(__file__).parent
+                cfg_path = cfg_dir / "CMC_Config.json"
 
-            # Persist if possible
-            try:
-                if callable(save_config):
-                    save_config(CONFIG, Path(__file__).parent)
-            except Exception:
-                pass
+                cfg = _cfg_load(cfg_dir) if callable(_cfg_load) else {}
+                if not isinstance(cfg, dict):
+                    cfg = {}
+                if not isinstance(cfg.get("ai"), dict):
+                    cfg["ai"] = {}
+                cfg["ai"]["model"] = new_model
+
+                if callable(_cfg_save):
+                    _cfg_save(cfg, cfg_dir)
+
+                verify = _cfg_load(cfg_dir) if callable(_cfg_load) else cfg
+                persisted = None
+                if isinstance(verify, dict):
+                    persisted = (verify.get("ai", {}) or {}).get("model")
+                if persisted != new_model:
+                    p(f"[red]Failed to persist AI model.[/red] Check write access to {cfg_path}")
+                    return
+
+                CONFIG = verify if isinstance(verify, dict) else cfg
+            except Exception as e:
+                p(f"[red]Failed to save AI model to config.[/red] {e}")
+                return
 
             # Sync assistant runtime if available
             try:
@@ -2706,7 +2910,7 @@ def handle_command(s: str):
             except Exception:
                 pass
 
-            p(f"[green]AI model updated to:[/green] {new_model}")
+            p(f"[green]AI model updated and saved:[/green] {new_model}")
             p("[dim]AI conversation history cleared (new model).[/dim]")
             return
 
@@ -2866,6 +3070,38 @@ def handle_command(s: str):
 
     
     
+    # ---------- setup (auto-detect & get project running) ----------
+    if low == "setup":
+        try:
+            handle_setup(CWD, p)
+        except Exception as e:
+            p(f"[red]❌ Setup error:[/red] {e}")
+        return
+
+    # ---------- new <type> (project scaffolding) ----------
+    if low.startswith("new ") or low == "new":
+        try:
+            handle_new(s, CWD, p)
+        except Exception as e:
+            p(f"[red]❌ New project error:[/red] {e}")
+        return
+
+    # ---------- dev [script|stop] (smart dev-server launcher) ----------
+    if low == "dev" or low.startswith("dev "):
+        try:
+            handle_dev(s, CWD, p)
+        except Exception as e:
+            p(f"[red]❌ Dev error:[/red] {e}")
+        return
+
+    # ---------- env (dotenv file manager) ----------
+    if low == "env" or low.startswith("env "):
+        try:
+            handle_env(s, CWD, p)
+        except Exception as e:
+            p(f"[red]❌ Env error:[/red] {e}")
+        return
+
     # ---------- Project Scan ----------
     m = re.match(r"^projectscan$", s, re.I)
     if m:
@@ -2876,32 +3112,6 @@ def handle_command(s: str):
         return
         
         
-    # ---------- Project Setup Wizard ----------
-    m = re.match(r"^projectsetup$", s, re.I)
-    if m:
-        try:
-            op_project_setup()
-        except Exception as e:
-            p(f"[red]❌ Project setup failed:[/red] {e}")
-        return
-        
-    # ---------- Web Project Setup ----------
-    if low == "websetup":
-        try:
-            op_web_setup()
-        except Exception as e:
-            p(f"[red]❌ Web setup failed:[/red] {e}")
-        return
-
-
-
-    # ---------- Web Project Create ----------
-    if low == "webcreate":
-        try:
-            op_web_create()
-        except Exception as e:
-            p(f"[red]❌ Web project creation failed:[/red] {e}")
-        return
 
 
 
@@ -3453,10 +3663,19 @@ def handle_command(s: str):
     if m: macro_add(m.group(1), m.group(2)); return
     m = re.match(r"^macro\s+run\s+([A-Za-z0-9_\-]+)$", s, re.I)
     if m: macro_run(m.group(1)); return
+    m = re.match(r"^macro\s+edit\s+([A-Za-z0-9_\-]+)$", s, re.I)
+    if m: macro_edit(m.group(1)); return
     m = re.match(r"^macro\s+delete\s+([A-Za-z0-9_\-]+)$", s, re.I)
     if m: macro_delete(m.group(1)); return
     if re.match(r"^macro\s+list$", s, re.I): macro_list(); return
     if re.match(r"^macro\s+clear$", s, re.I): macro_clear(); return
+
+    # ---------- Ports ----------
+    if low == "ports":
+        op_ports(p); return
+    m = re.match(r"^kill\s+(\d+)$", s, re.I)
+    if m:
+        op_kill_port(int(m.group(1)), p); return
     
         # ---------- File Operations ----------
     m = re.match(r"^create\s+file\s+'(.+?)'\s+in\s+'(.+?)'(?:\s+with\s+text=['\"](.+?)['\"])?$", s, re.I)
@@ -3694,7 +3913,7 @@ Examples:
 -----------------------------------
 
 Folder-level search (current folder):
-• find '<pattern>'                Find files/folders by name
+• find '<name>'                   Find files/folders by name — any partial match works
 • findext '.ext'                  Filter by extension (example: '.json')
 • recent                          Show newest files
 • biggest                         Show largest files
@@ -3718,6 +3937,8 @@ Notes:
 
 Examples:
   find 'log'
+  find '.py'
+  find 'test'
   findext '.json'
   search 'error'
   /build C D
@@ -3750,20 +3971,23 @@ Examples:
 Macros = saved automation (comma-separated chains).
 
 Commands:
-• macro add <name> = <command>
-• macro run <name>
-• macro delete <name>
-• macro list
-• macro clear
+• macro add <name> = <command>     Save a new macro
+• macro run <name>                 Run a macro
+• macro edit <name>                Edit a macro in a pre-filled prompt (clickable!)
+• macro delete <name>              Delete a macro
+• macro list                       List all saved macros
+• macro clear                      Delete all macros
 
 Tips:
 • Use single quotes around paths in macros.
 • Use variables: %HOME% %DATE% %NOW%
+• macro edit opens the existing command pre-filled — just change what you need.
 
 Examples:
   macro add desk = cd '%HOME%/Desktop'
   macro add publish = copy 'Computer_Main_Centre.py' to 'C:/Public/Computer_Main_Centre.py'
   macro run desk
+  macro edit desk
 """
 
 
@@ -3845,6 +4069,14 @@ You usually do NOT need normal git commands.
 • git debug upload / git debug update ...
   Same as force, but also prints the steps it performed.
 
+[bold]Branch management[/bold]
+
+• git branch list               List all branches (local + remote)
+• git branch create <name>      Create a new branch and switch to it
+• git branch switch <name>      Switch to an existing branch
+• git branch delete <name>      Delete a branch
+• git branch merge <name>       Merge a branch into your current branch
+
 [bold]Diagnostics / extras[/bold]
 
 • git status
@@ -3896,6 +4128,9 @@ Examples:
   git repo delete MyAcc/OldTestRepo
   git status
   git doctor
+  git branch list
+  git branch create my-feature
+  git branch switch main
 """
 
 
@@ -3915,7 +4150,6 @@ Java:
 Examples:
   java list
   java change 17
-  projectsetup
 """
 
     sec9 = """
@@ -3945,6 +4179,15 @@ Timing:
 
 Input:
 • sendkeys "<text>{ENTER}"
+
+Ports & processes:
+• ports                           Show all listening ports with PID and process name
+• kill <port>                     Kill whatever process is running on that port
+
+Examples:
+  ports
+  kill 3000
+  kill 5173
 """
 
     sec10 = """
@@ -3973,40 +4216,49 @@ Examples:
 
 
     sec11 = """
-[bold]8. Web Projects[/bold]
+[bold]11. Project setup & dev tools[/bold]
 -----------------------------------
 
-Web helpers for Python & frontend projects.
+Create a new project from scratch:
+• new python                       Python script/CLI (venv + requirements.txt)
+• new node                         Node.js project
+• new flask                        Flask REST API (venv + CORS + .env)
+• new fastapi                      FastAPI project (venv + uvicorn + /docs)
+• new react                        React + Vite
+• new vue                          Vue 3 + Vite
+• new svelte                       Svelte + Vite
+• new next                         Next.js (via create-next-app)
+• new electron                     Electron desktop app
+• new discord                      Discord.py bot skeleton
+• new cli                          Python CLI tool (argparse)
+• new web                          Full-stack web app (pick frontend + backend)
 
-• websetup
-  Analyze the CURRENT folder.
-  Detects web project type (Flask, etc).
-  Offers recommended setup actions like:
-   - create virtual environment (venv)
-   - generate requirements.txt
-   - create start_server.bat
-   - create README.md
+Set up an existing project (auto-detects type):
+• setup                            Install deps, copy .env, offer to start server
 
-• webcreate
-  Create a NEW web project from scratch.
-  Lets you choose:
-   - backend (Flask, etc)
-   - frontend (basic HTML, Vue, etc if available)
-  Generates folder structure and starter files.
+Dev server (smart launcher — opens browser automatically):
+• dev                              Auto-detect project + start + open browser
+• dev <script>                     Run a specific package.json script
+• dev stop                         Kill the last dev server launched by CMC
 
-• projectsetup
-  General project wizard (not web-only).
-  Useful for non-web Python or mixed projects.
-
-Notes:
-• websetup is for EXISTING projects.
-• webcreate is for NEW projects.
-• All actions are confirmed before writing files.
+.env file manager:
+• env list                         List all keys in .env (values hidden)
+• env show                         List all keys and values
+• env get <KEY>                    Show one value
+• env set KEY=value                Add or update a key
+• env delete <KEY>                 Remove a key
+• env template                     Create .env.example (values blanked)
+• env check                        Compare .env vs .env.example
 
 Examples:
-  websetup
-  webcreate
-  projectsetup
+  new flask
+  new react
+  setup
+  dev
+  dev build
+  new web
+  env set PORT=3000
+  env check
 """
 
     sec12 = """
@@ -4159,7 +4411,7 @@ Examples:
         "8": ("Java & servers", sec8),
         "9": ("Automation", sec9),
         "10": ("Web & downloads", sec10),
-        "11": ("Project & web setup", sec11),
+        "11": ("Project setup & dev tools", sec11),
         "12": ("AI models & commands", sec12),
         "13": ("Flags & modes", sec13),
         "14": ("Docker", sec14),
@@ -4173,12 +4425,12 @@ Examples:
         "space": "4", "disk": "4", "cleanup": "4",
         "macro": "5", "macros": "5",
         "alias": "6", "aliases": "6",
-        "git": "7",
+        "git": "7", "branch": "7", "branches": "7",
         "java": "8",
         "server": "8", "servers": "8",
-        "auto": "9", "automation": "9",
+        "auto": "9", "automation": "9", "ports": "9", "port": "9", "kill": "9",
         "web": "10", "downloads": "10",
-        "project": "11", "websetup": "11", "webcreate": "11",
+        "project": "11", "scaffold": "11", "new": "11", "dev": "11", "env": "11", "setup": "11",
         "ai": "12", "model": "12", "models": "12", "ollama": "12",
         "flags": "13", "mode": "13", "modes": "13",
         "batch": "13", "ssl": "13", "dry-run": "13",
@@ -4200,7 +4452,7 @@ Type `help <number>` to open a section or use: help all
   8. Java & servers
   9. Automation
  10. Web & downloads
- 11. Project & web setup
+ 11. Project setup & dev tools
  12. AI models & commands
  13. Flags & modes
  14. Docker
@@ -4338,12 +4590,17 @@ def complete_command(text, state):
     "ssl on", "ssl off", "status", "log", "undo",
 
     # Macros
-    "macro add", "macro run", "macro list", "macro delete", "macro clear",
+    "macro add", "macro run", "macro edit", "macro list", "macro delete", "macro clear",
+
+    # Ports
+    "ports", "kill",
 
     # Git
     "/gitsetup", "/gitlink", "/gitupdate", "/gitpull", "/gitstatus",
     "/gitlog", "/gitbranch", "/gitignore add", "/gitclean", "/gitdoctor",
     "/gitfix", "/gitlfs setup",
+    "git branch", "git branch list", "git branch create", "git branch switch",
+    "git branch delete", "git branch merge",
 
     # Docker
     "docker ps", "docker ps all", "docker images",
@@ -4367,8 +4624,7 @@ def complete_command(text, state):
     # Automation
     "sleep", "sendkeys",
 
-    # Web project tools
-    "webcreate", "websetup",
+    # Web project tools (new web replaces old webcreate/websetup)
 
     # Control
     "help", "exit",
@@ -4479,9 +4735,11 @@ def build_completer():
         "ssl on", "ssl off",
         "status", "log", "undo",
         # Macros
-        "macro add", "macro run", "macro list", "macro delete", "macro clear",
+        "macro add", "macro run", "macro edit", "macro list", "macro delete", "macro clear",
         # Aliases
         "alias add", "alias delete", "alias list",
+        # Ports
+        "ports", "kill",
         # Git
         "git upload", "git update", "git download", "git clone",
         "git link", "git status", "git log", "git doctor",
@@ -4489,6 +4747,8 @@ def build_completer():
         "git force upload", "git force update",
         "git debug upload", "git debug update",
         "git open",
+        "git branch", "git branch list", "git branch create", "git branch switch",
+        "git branch delete", "git branch merge",
         # Docker
         "docker ps", "docker ps all", "docker images",
         "docker start", "docker stop", "docker restart", "docker remove",
@@ -4512,8 +4772,13 @@ def build_completer():
         "model list", "model current", "model set",
         # Config
         "config list", "config get", "config set", "config reset",
-        # Project / web setup
-        "projectsetup", "projectscan", "websetup", "webcreate",
+        # Scaffolding & dev tools
+        "setup",
+        "new", "new python", "new node", "new flask", "new fastapi",
+        "new react", "new vue", "new svelte", "new next",
+        "new electron", "new discord", "new cli", "new web",
+        "dev", "dev stop",
+        "env list", "env show", "env get", "env set", "env delete", "env template", "env check",
         # Automation
         "sleep", "timer", "sendkeys",
         # System

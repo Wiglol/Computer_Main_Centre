@@ -1427,6 +1427,92 @@ def handle_git_commands(raw: str, low: str, cwd: Union[str, Path], p: PFunc, RIC
         return True
 
     # --------------------------------------------------------
+    # git branch  (CMC-friendly branch management)
+    # --------------------------------------------------------
+    if cmd == "branch":
+        sub = toks[2].lower() if len(toks) >= 3 else "list"
+
+        # git branch list  (or just: git branch)
+        if sub == "list" or sub == "branch":
+            rc, out = _git_run(["branch", "-a"], cwd=root)
+            if rc != 0:
+                p(f"[red]❌ git branch failed:[/red] {out}"); return True
+            lines = [l.strip() for l in out.splitlines() if l.strip()]
+            if not lines:
+                p("[yellow]No branches found.[/yellow]"); return True
+            p("[cyan]Branches:[/cyan]")
+            for ln in lines:
+                current = ln.startswith("*")
+                name_clean = ln.lstrip("* ").strip()
+                if current:
+                    p(f"  [bold green]* {name_clean}[/bold green]  [dim](current)[/dim]")
+                else:
+                    p(f"  [dim]  {name_clean}[/dim]")
+            return True
+
+        # git branch create <name>  /  git branch new <name>
+        if sub in ("create", "new"):
+            bname = toks[3] if len(toks) >= 4 else ""
+            if not bname:
+                p("[red]❌ Usage:[/red] git branch create <name>"); return True
+            rc, out = _git_run(["checkout", "-b", bname], cwd=root)
+            if rc == 0:
+                p(f"[green]✅ Created and switched to branch:[/green] {bname}")
+            else:
+                p(f"[red]❌ Failed:[/red] {out}")
+            return True
+
+        # git branch switch <name>  /  git branch go <name>
+        if sub in ("switch", "go", "checkout"):
+            bname = toks[3] if len(toks) >= 4 else ""
+            if not bname:
+                p("[red]❌ Usage:[/red] git branch switch <name>"); return True
+            rc, out = _git_run(["checkout", bname], cwd=root)
+            if rc == 0:
+                p(f"[green]✅ Switched to branch:[/green] {bname}")
+            else:
+                p(f"[red]❌ Failed:[/red] {out}")
+            return True
+
+        # git branch delete <name>
+        if sub == "delete":
+            bname = toks[3] if len(toks) >= 4 else ""
+            if not bname:
+                p("[red]❌ Usage:[/red] git branch delete <name>"); return True
+            rc, out = _git_run(["branch", "-d", bname], cwd=root)
+            if rc == 0:
+                p(f"[green]✅ Deleted branch:[/green] {bname}")
+            else:
+                # try force delete
+                rc2, out2 = _git_run(["branch", "-D", bname], cwd=root)
+                if rc2 == 0:
+                    p(f"[green]✅ Force-deleted branch:[/green] {bname}")
+                else:
+                    p(f"[red]❌ Failed:[/red] {out}")
+            return True
+
+        # git branch merge <name>  — merge named branch into current
+        if sub == "merge":
+            bname = toks[3] if len(toks) >= 4 else ""
+            if not bname:
+                p("[red]❌ Usage:[/red] git branch merge <name>"); return True
+            rc, out = _git_run(["merge", bname], cwd=root)
+            if rc == 0:
+                p(f"[green]✅ Merged:[/green] {bname} → current branch")
+            else:
+                p(f"[red]❌ Merge failed:[/red] {out}")
+            return True
+
+        # fallback help
+        p("[cyan]git branch[/cyan] commands:")
+        p("  git branch list              List all branches")
+        p("  git branch create <name>     Create + switch to a new branch")
+        p("  git branch switch <name>     Switch to an existing branch")
+        p("  git branch delete <name>     Delete a branch")
+        p("  git branch merge <name>      Merge a branch into the current one")
+        return True
+
+    # --------------------------------------------------------
     # Default: Pass-through to real git for EVERYTHING else.
     # --------------------------------------------------------
     args = toks[1:]  # everything after the leading "git"

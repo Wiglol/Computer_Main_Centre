@@ -1,0 +1,73 @@
+{
+  "root": "C:\\Users\\Wiggo\\Desktop\\CMC_Claude",
+  "total_bytes": 2294492065,
+  "top_folders": [
+    {
+      "path": "C:\\Users\\Wiggo\\Desktop\\CMC_Claude\\CentreIndex",
+      "bytes": 1383424000
+    },
+    {
+      "path": "C:\\Users\\Wiggo\\Desktop\\CMC_Claude\\src",
+      "bytes": 910283037
+    },
+    {
+      "path": "C:\\Users\\Wiggo\\Desktop\\CMC_Claude\\.git",
+      "bytes": 712775
+    },
+    {
+      "path": "C:\\Users\\Wiggo\\Desktop\\CMC_Claude\\manuals",
+      "bytes": 52306
+    },
+    {
+      "path": "C:\\Users\\Wiggo\\Desktop\\CMC_Claude\\UpdateNotes",
+      "bytes": 2119
+    },
+    {
+      "path": "C:\\Users\\Wiggo\\Desktop\\CMC_Claude\\.claude",
+      "bytes": 1650
+    }
+  ],
+  "top_files": [
+    {
+      "path": "C:\\Users\\Wiggo\\Desktop\\CMC_Claude\\CentreIndex\\paths.db",
+      "bytes": 1383424000
+    },
+    {
+      "path": "C:\\Users\\Wiggo\\Desktop\\CMC_Claude\\src\\CentreIndex\\paths.db",
+      "bytes": 909475840
+    },
+    {
+      "path": "C:\\Users\\Wiggo\\Desktop\\CMC_Claude\\src\\__pycache__\\Computer_Main_Centre.cpython-313.pyc",
+      "bytes": 213271
+    },
+    {
+      "path": "C:\\Users\\Wiggo\\Desktop\\CMC_Claude\\src\\Computer_Main_Centre.py",
+      "bytes": 177037
+    },
+    {
+      "path": "C:\\Users\\Wiggo\\Desktop\\CMC_Claude\\src\\__pycache__\\CMC_Git.cpython-313.pyc",
+      "bytes": 61482
+    },
+    {
+      "path": "C:\\Users\\Wiggo\\Desktop\\CMC_Claude\\src\\CMC_Git.py",
+      "bytes": 54618
+    },
+    {
+      "path": "C:\\Users\\Wiggo\\Desktop\\CMC_Claude\\src\\__pycache__\\CMC_Scaffold.cpython-313.pyc",
+      "bytes": 51028
+    },
+    {
+      "path": "C:\\Users\\Wiggo\\Desktop\\CMC_Claude\\.git\\objects\\03\\90f45a956174720e8a8a4657272429b83ae9c5",
+      "bytes": 48115
+    },
+    {
+      "path": "C:\\Users\\Wiggo\\Desktop\\CMC_Claude\\.git\\objects\\d8\\cad9cf4d7c1f45272e3c428f2f983f0f813e54",
+      "bytes": 48013
+    },
+    {
+      "path": "C:\\Users\\Wiggo\\Desktop\\CMC_Claude\\.git\\objects\\6e\\222827299929230c78cb6d879316802c12f676",
+      "bytes": 47974
+    }
+  ],
+  "junk_candidates": []
+}

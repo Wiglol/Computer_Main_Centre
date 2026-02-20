@@ -1,0 +1,22 @@
+{
+  "ai": {
+    "model": "llama3.1:8b"
+  },
+  "batch": false,
+  "dry_run": false,
+  "git": {
+    "open_browser": true
+  },
+  "header": {
+    "show_update": true
+  },
+  "prompt": {
+    "show_path": true
+  },
+  "space": {
+    "auto_ai": false,
+    "auto_report": false,
+    "default_depth": 2
+  },
+  "ssl_verify": true
+}

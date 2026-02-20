@@ -12,6 +12,7 @@ This module provides a small nested-JSON config system, with helpers:
 Keys support dotted paths, e.g.:
 
     "batch"
+    "ai.model"
     "space.default_depth"
     "space.auto_ai"
 """
@@ -27,6 +28,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "batch": False,
     "dry_run": False,
     "ssl_verify": True,
+    "ai": {
+        "model": "llama3.1:8b",
+    },
     "space": {
         "default_depth": 2,
         "auto_ai": False,
