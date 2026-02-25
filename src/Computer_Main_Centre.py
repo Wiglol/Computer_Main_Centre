@@ -139,6 +139,31 @@ def _start_bg_update_check():
         
         
 
+_JAVA_DETECT_THREAD_STARTED = False
+
+def _start_bg_java_detect(delay_seconds: float = 5.0):
+    """
+    Kick off delayed Java detection so CMC can render immediately.
+    """
+    global _JAVA_DETECT_THREAD_STARTED
+    if _JAVA_DETECT_THREAD_STARTED:
+        return
+    _JAVA_DETECT_THREAD_STARTED = True
+
+    if not STATE.get("java_version") or STATE.get("java_version") == "?":
+        STATE["java_version"] = "checking..."
+
+    def _worker():
+        try:
+            import time as _time
+            _time.sleep(max(0.0, float(delay_seconds)))
+            load_java_cfg(detect_live=True)
+        except Exception:
+            STATE["java_version"] = "?"
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+
 # ---------- Safe Rich print wrapper (global early definition) ----------
 def p(x):
     """Universal print wrapper for Rich and non-Rich output."""
@@ -187,7 +212,8 @@ STATE = {
     "batch": False,
     "dry_run": False,
     "ssl_verify": True,
-    "history": [str(CWD)]
+    "history": [str(CWD)],
+    "java_version": "?",
 }
 
 # --- Detect CMC update status in background (works for git clones + zip installs) ---
@@ -282,7 +308,7 @@ def detect_java_version() -> str:
     return "?"
 
 
-def load_java_cfg():
+def load_java_cfg(detect_live: bool = True):
     """Load persisted Java info or auto-detect + refresh environment."""
     ver = "?"
     home = None
@@ -296,10 +322,11 @@ def load_java_cfg():
     except Exception:
         pass
 
-    # Always re-detect actual version live
-    detected = detect_java_version()
-    if detected and detected != "?":
-        ver = detected
+    if detect_live:
+        # Re-detect actual version live (can be delayed to avoid startup lag)
+        detected = detect_java_version()
+        if detected and detected != "?":
+            ver = detected
 
     STATE["java_version"] = ver
     if home:
@@ -321,8 +348,7 @@ def save_java_cfg(ver: str, home: str):
 
 
 # --- Auto-load + detect on startup ---
-load_java_cfg()
-STATE["java_version"] = detect_java_version()
+load_java_cfg(detect_live=False)
 
 
 
@@ -575,7 +601,7 @@ def status_panel():
     ai_status = "[green]Ready[/green]" if HAVE_ASSISTANT else "[red]Not configured[/red]"
 
     # ── Java ───────────────────────────────────────────────────────────────
-    java_version = STATE.get("java_version") or detect_java_version()
+    java_version = STATE.get("java_version") or "checking..."
 
     # ── CMC update ─────────────────────────────────────────────────────────
     upd = STATE.get("cmc_update_status", "unknown")
@@ -625,7 +651,7 @@ def show_status_box():
         batch = "ON" if STATE["batch"] else "off"
         dry   = "ON" if STATE["dry_run"] else "off"
         ssl   = "ON" if STATE["ssl_verify"] else "off"
-        java_version = STATE.get("java_version") or detect_java_version()
+        java_version = STATE.get("java_version") or "checking..."
         print(f"Batch: {batch}  Dry-Run: {dry}  SSL: {ssl}")
         print(f"AI: {get_ai_model()}  Java: {java_version}")
         upd = STATE.get("cmc_update_status", "unknown")
@@ -4842,6 +4868,7 @@ def main():
         _time.sleep(0.05)
 
     show_header()
+    _start_bg_java_detect(5.0)
 
     # Show update notes once after an update (if UpdateNotes/LATEST.txt exists)
     maybe_show_update_notes()
