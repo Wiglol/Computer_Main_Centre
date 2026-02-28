@@ -191,6 +191,19 @@ try:
 except Exception:
     HAVE_ASSISTANT = False
 
+
+def _check_ollama_alive(timeout: float = 0.5) -> bool:
+    """Quick TCP check — True if Ollama is listening on localhost:11434."""
+    try:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        result = s.connect_ex(("127.0.0.1", 11434))
+        s.close()
+        return result == 0
+    except Exception:
+        return False
+
 # Track the last command + error for "ai fix"
 _LAST_CMD: str = ""
 _LAST_ERROR: str = ""
@@ -464,7 +477,12 @@ def show_header():
     SSL and Java are moved to the `status` command for a cleaner look.
     """
     ai_model = get_ai_model()
-    ai_status = "[green]Ready[/green]" if HAVE_ASSISTANT else "[red]Not configured[/red]"
+    if not HAVE_ASSISTANT:
+        ai_status = "[red]Not configured[/red]"
+    elif _check_ollama_alive():
+        ai_status = "[green]Ready[/green]"
+    else:
+        ai_status = "[yellow]Ollama offline[/yellow]"
 
     batch_val = "[yellow]ON[/yellow]" if STATE["batch"] else "[dim]off[/dim]"
     dry_val   = "[yellow]ON[/yellow]" if STATE["dry_run"] else "[dim]off[/dim]"
@@ -3369,25 +3387,48 @@ def handle_command(s: str):
         target_path = None
         chosen_key = None
 
-        # 1. Try direct key match (version or name)
+        # 1. Direct key match (exact key name in JAVA_VERSIONS)
         if arg in JAVA_VERSIONS:
             target_path = JAVA_VERSIONS[arg]
             chosen_key = arg
-        else:
-            # 2. Try partial match (e.g. "17" matches "jdk-17.0.x")
-            for k, v in JAVA_VERSIONS.items():
-                if arg in k or arg in v:
-                    target_path = v
-                    chosen_key = k
-                    break
 
-        # 3. If still not found, maybe it's a full path
-        if not target_path and Path(arg).exists():
+        # 2. Numeric major-version match: "17" → "jdk-17.0.16.8-hotspot" or key "17.0.2"
+        #    Extracts the first digit group from each key, so "17" matches any
+        #    installation whose folder/key name starts with major version 17.
+        if not target_path and re.fullmatch(r"\d+", arg):
+            best_key = best_path = None
+            for k, v in JAVA_VERSIONS.items():
+                first_num = re.search(r"(\d+)", k)
+                if first_num and first_num.group(1) == arg:
+                    # Prefer JDK over JRE when multiple hits share the same major version
+                    if best_key is None or ("jdk" in k.lower() and "jre" in best_key.lower()):
+                        best_key, best_path = k, v
+            if best_key:
+                target_path, chosen_key = best_path, best_key
+
+        # 3. Full directory path supplied directly
+        if not target_path and Path(arg).is_dir():
             target_path = arg
             chosen_key = Path(arg).name
 
-        if not target_path or not Path(target_path).exists():
-            p(f"[red]Java version or path not found:[/red] {arg}")
+        # Not found — tell the user what IS installed
+        if not target_path:
+            installed = {k: v for k, v in JAVA_VERSIONS.items() if Path(v).exists()}
+            if installed:
+                def _major(k):
+                    n = re.search(r"(\d+)", k)
+                    return n.group(1) if n else k
+                versions_hint = ", ".join(sorted({_major(k) for k in installed}, key=lambda x: int(x) if x.isdigit() else 0))
+                p(f"[red]Java {arg!r} not found.[/red]  Installed: [cyan]{versions_hint}[/cyan]" if RICH else f"Java '{arg}' not found. Installed: {versions_hint}")
+                p("[dim]Use 'java list' to see full paths.[/dim]" if RICH else "Use 'java list' to see full paths.")
+            else:
+                p("[red]No Java installations detected.[/red]  Use 'java list' to check." if RICH else "No Java installations detected. Use 'java list' to check.")
+            return
+
+        # Path was resolved from JAVA_VERSIONS but no longer exists on disk
+        if not Path(target_path).exists():
+            p(f"[red]Java path no longer exists:[/red] {target_path}" if RICH else f"Java path missing: {target_path}")
+            p("[dim]Run 'java list' to see what is currently installed.[/dim]" if RICH else "Run 'java list' to check.")
             return
 
         # ---- Apply to current process (CMC runtime only) ----
@@ -3432,6 +3473,10 @@ def handle_command(s: str):
                 winreg.HKEY_LOCAL_MACHINE, reg_path, 0,
                 winreg.KEY_READ | winreg.KEY_WRITE,
             ) as key:
+                # Set system JAVA_HOME directly via registry
+                winreg.SetValueEx(key, "JAVA_HOME", 0, winreg.REG_EXPAND_SZ, target_path)
+
+                # Update system Path: strip old java/jdk entries, prepend new bin
                 current_path, _ = winreg.QueryValueEx(key, "Path")
                 parts = current_path.split(";")
                 parts = [
@@ -3442,30 +3487,30 @@ def handle_command(s: str):
                 new_path = ";".join(parts)
                 winreg.SetValueEx(key, "Path", 0, winreg.REG_EXPAND_SZ, new_path)
 
-            subprocess.run(
-                ["setx", "JAVA_HOME", target_path, "/M"],
-                shell=True, check=True, text=True, capture_output=True,
-            )
-            p(f"[green]Java set system-wide to: {chosen_key or target_path}[/green]" if RICH else f"Java set system-wide to: {chosen_key or target_path}")
-            p("Restart terminals and launchers to apply PATH changes.")
+            p(f"[green]✔ System JAVA_HOME → {target_path}[/green]" if RICH else f"System JAVA_HOME -> {target_path}")
+            p(f"[green]✔ System Path updated (java bin prepended)[/green]" if RICH else "System Path updated.")
+            p("[dim]Restart terminals and launchers to apply PATH changes.[/dim]" if RICH else "Restart terminals to apply PATH changes.")
 
         except PermissionError:
             # ---- Tier 3: Request UAC elevation via PowerShell ----
             p("[yellow]Admin rights needed for system PATH. Requesting elevation...[/yellow]" if RICH else "Admin rights needed. Requesting elevation...")
-            ps_script = (
-                f'$ErrorActionPreference = "Stop"; '
-                f'& setx JAVA_HOME "{target_path}" /M; '
-                f'$regPath = "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment"; '
-                f'$cur = (Get-ItemProperty -Path $regPath -Name Path).Path; '
-                f'$parts = $cur -split ";" | Where-Object {{ $_ -and $_.ToLower() -notmatch "java|jdk" }}; '
-                f'$newPath = "{java_bin};" + ($parts -join ";"); '
-                f'Set-ItemProperty -Path $regPath -Name Path -Value $newPath -Type ExpandString'
-            )
+            # Build the PowerShell script as plain text, then base64-encode it
+            # to avoid all quoting issues when passing via -EncodedCommand.
+            ps_lines = [
+                '$regPath = "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment"',
+                f'Set-ItemProperty -Path $regPath -Name JAVA_HOME -Value "{target_path}" -Type ExpandString',
+                '$cur = (Get-ItemProperty -Path $regPath -Name Path).Path',
+                '$parts = $cur -split ";" | Where-Object { $_ -and $_.ToLower() -notmatch "java|jdk" }',
+                f'$newPath = "{java_bin};" + ($parts -join ";")',
+                'Set-ItemProperty -Path $regPath -Name Path -Value $newPath -Type ExpandString',
+            ]
+            ps_script = "\n".join(ps_lines)
             try:
-                import ctypes
+                import ctypes, base64
+                encoded_cmd = base64.b64encode(ps_script.encode("utf-16-le")).decode("ascii")
                 ret = ctypes.windll.shell32.ShellExecuteW(
                     None, "runas", "powershell.exe",
-                    f'-NoProfile -ExecutionPolicy Bypass -Command "{ps_script}"',
+                    f"-NoProfile -ExecutionPolicy Bypass -EncodedCommand {encoded_cmd}",
                     None, 1,
                 )
                 if ret > 32:
