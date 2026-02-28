@@ -308,10 +308,50 @@ Java runtime management:
 
 Note: `java change` updates both user-level and system-level Path. If it needs admin rights it will prompt for UAC.
 
-Project helpers:
-- `projectsetup`
-- `websetup`
-- `webcreate`
+---
+
+# ===========================
+# 8b. PROJECT SCAFFOLDING & DEV TOOLS
+# ===========================
+
+Create a new project from scratch:
+- `new python` — Python script/CLI (venv + requirements.txt)
+- `new node` — Node.js project
+- `new flask` — Flask REST API
+- `new fastapi` — FastAPI project
+- `new react` — React + Vite
+- `new vue` — Vue 3 + Vite
+- `new svelte` — Svelte + Vite
+- `new next` — Next.js
+- `new electron` — Electron desktop app
+- `new discord` — Discord.py bot skeleton
+- `new cli` — Python CLI tool (argparse)
+- `new web` — full-stack web app (choose frontend + backend)
+
+Set up an existing project:
+- `setup` — auto-detect project type, install deps, copy .env, offer to start server
+
+Dev server (auto-detects project, opens browser):
+- `dev` — start dev server
+- `dev <script>` — run a specific package.json script
+- `dev stop` — kill the last dev server launched by CMC
+
+.env file manager:
+- `env list` — list all keys in .env (values hidden)
+- `env show` — list all keys and values
+- `env get <KEY>` — show one value
+- `env set KEY=value` — add or update a key
+- `env delete <KEY>` — remove a key
+- `env template` — create .env.example with values blanked
+- `env check` — compare .env vs .env.example
+
+Example:
+```cmc
+new flask
+setup
+dev
+env set PORT=3000
+```
 
 ---
 
@@ -511,6 +551,86 @@ ai-model set qwen2.5:14b-instruct
 Build path index on drives C and D:
 ```cmc
 /build C D
+```
+
+---
+
+# ===========================
+# 16. DOCKER COMMANDS
+# ===========================
+
+Docker must be installed and the daemon must be running.
+
+## 16.1 Containers
+- `docker ps` — list running containers
+- `docker ps all` — list all containers (including stopped)
+- `docker start <name>` — start a stopped container
+- `docker stop <name>` — stop a running container
+- `docker restart <name>` — restart a container
+- `docker remove <name>` — stop + remove in one step
+- `docker shell <name>` — open interactive shell (tries bash then sh)
+- `docker logs <name>` — show last 50 log lines
+- `docker logs follow <name>` — stream logs live (Ctrl+C to stop)
+- `docker stats` — live CPU/memory for all containers
+- `docker stats <name>` — live stats for one container
+- `docker inspect <name>` — show container or image details
+- `docker ip <name>` — show container IP address
+
+## 16.2 Images
+- `docker images` — list local images
+- `docker pull <image>` — pull from Docker Hub
+- `docker push <image>` — push to registry
+- `docker build <tag>` — build from Dockerfile in current folder
+- `docker build <tag> <path>` — build from Dockerfile at path
+
+## 16.3 Run
+- `docker run <image>` — run interactively (removed on exit)
+- `docker run <image> -d` — run in background (detached)
+- `docker run <image> -p 8080:80` — map port host:container
+- `docker run <image> -e KEY=VAL` — set environment variable
+- `docker run <image> -n myname` — assign a name
+
+## 16.4 Compose (run from folder with docker-compose.yml)
+- `docker compose up` — build and start all services in background
+- `docker compose down` — stop and remove all services
+- `docker compose logs` — show last 50 lines
+- `docker compose logs follow` — stream logs live
+- `docker compose build` — rebuild all images (no cache)
+- `docker compose ps` — list compose services and status
+- `docker compose restart` — restart all services
+
+## 16.5 Volumes & Networks
+- `docker volumes` — list volumes
+- `docker volume remove <name>` — remove a volume
+- `docker networks` — list networks
+- `docker network remove <name>` — remove a network
+
+## 16.6 Cleanup
+- `docker clean` — remove stopped containers + dangling images
+- `docker clean all` — full system prune (containers, images, volumes, networks)
+- `docker prune-safe` — preview then safely remove stopped containers + dangling images
+
+## 16.7 Power commands (not in standard Docker CLI)
+- `docker wait <name>` — poll until container is running/healthy (max 60s)
+- `docker errors <name>` — filter logs to error/warning lines only
+- `docker env run <image>` — run image injecting all vars from .env file in current folder
+- `docker backup <name>` — save container config to a timestamped zip in current folder
+- `docker clone <name> <new>` — duplicate container (same image + env, no port conflict)
+- `docker watch <name>` — stream logs with periodic CPU/MEM stats overlay
+- `docker size <image>` — show layer-by-layer size breakdown
+- `docker port-check` — check compose file ports vs currently listening ports
+
+## 16.8 Doctor
+- `docker doctor` — check Docker installation and daemon status
+
+Example:
+```cmc
+docker ps
+docker compose up
+docker wait myapp
+docker errors myapp
+docker backup myapp
+docker port-check
 ```
 
 ---

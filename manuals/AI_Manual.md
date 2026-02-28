@@ -55,15 +55,14 @@ Command routing order inside handle_command is roughly:
 9. git ... (delegated to CMC_Git.py)
 10. docker ... (delegated to CMC_Docker.py)
 11. setup / new ... / dev ... / env ...
-12. projectscan
-13. timer / sleep / sendkeys / run
-14. help / ? / status / batch / dry-run / ssl / log / undo / echo / exit
-15. alias add/delete/list
-16. java list/version/reload/change
-17. sysinfo
-18. file/navigation/search/download/index routes
-19. cmd (interactive session)
-20. unknown-command suggestions
+12. timer / sleep / sendkeys / run
+13. help / ? / status / batch / dry-run / ssl / log / undo / echo / exit
+14. alias add/delete/list
+15. java list/version/reload/change
+16. sysinfo
+17. file/navigation/search/download/index routes
+18. cmd (interactive session)
+19. unknown-command suggestions
 
 Why this matters:
 - Alias expansion happens before most command routes, so aliases can shadow built-ins.
@@ -173,11 +172,16 @@ Notes:
 Accepted syntax:
 - list
 - list '<path>'
-
-Actual parser does NOT accept list depth/only/pattern forms in this build, even though some docs mention them.
+- list '<path>' depth <n>
+- list '<path>' only files
+- list '<path>' only dirs
+- list '<path>' pattern <glob>   (e.g. *.py)
 
 Behavior:
-- Recursively walks depth=1 by default in op_list implementation.
+- Recursively walks depth=1 by default.
+- depth clamps how many directory levels are walked.
+- only files / only dirs filters the result type.
+- pattern applies fnmatch filtering on file/dir names.
 - Shows rows with full path + type.
 
 7.2 Info
@@ -536,8 +540,10 @@ ai-model list behavior:
   - %ProgramFiles(x86)%/Ollama/ollama.exe
 
 20.3 ai fix behavior
-- Uses last exception captured by main loop.
-- If command errors are swallowed internally (printed, no exception), ai fix may report no recent error.
+- Uses _LAST_CMD and _LAST_ERROR globals, set whenever a command fails OR is unrecognised.
+- Works on both Python exceptions (error = exception message) AND unknown/typo commands (error = "Unknown command").
+- When error is "Unknown command", asks AI what the user likely meant and what the correct syntax is.
+- A one-time tip ("Tip: type 'ai fix'") is shown on the first unknown command; suppressed forever after via sentinel file ~/.ai_helper/.cmc_ai_fix_tip_shown.
 
 20.4 Context passed to AI
 - Current CWD listing (top-level truncated)
@@ -546,6 +552,8 @@ ai-model list behavior:
 - Full macros (name + body)
 - Full aliases (name + command)
 - Recent log entries
+- recent_commands: rolling list of last 20 raw commands typed this session (includes typos/unknowns)
+- last_issue: {command: str, error: str} for the most recently failed or unrecognised command
 
 20.5 Manual selection behavior in assistant_core
 - If model name contains 14b/32b/70b/72b -> loads manuals/CMC_AI_Manual_MEDIUM.md
@@ -675,8 +683,9 @@ Run details:
 - docker network rm <name>
 
 22.4 Cleanup
-- docker clean
-- docker clean all
+- docker clean                           removes stopped containers + dangling images
+- docker clean all                       full system prune (containers, images, volumes, networks)
+- docker prune-safe                      previews what will be removed, then removes stopped containers + dangling images (volumes/networks untouched)
 
 22.5 Compose
 - docker compose up
@@ -690,7 +699,48 @@ Run details:
 22.6 Diagnostics
 - docker doctor
 
-22.7 Pass-through
+22.7 Power commands (CMC-only, not in standard Docker CLI)
+- docker wait <container>
+  Poll until container is running + healthy (max 60s, 1s interval). Prints status each second.
+  Reports "unhealthy" if healthcheck fails.
+
+- docker errors <container>
+  Fetches last 500 log lines and filters to lines matching: error, fatal, exception, traceback, critical, failed, panic, warn.
+  Shows at most 50 matches. Returns green message if none found.
+
+- docker env run <image>
+  Reads .env from current working directory and passes each key=value as -e to docker run.
+  Runs interactively with --rm.
+
+- docker prune-safe
+  Lists stopped containers (status=exited) and dangling images, then removes them.
+  Does NOT touch volumes, networks or in-use images.
+
+- docker backup <container>
+  Saves docker inspect output (JSON) + a README.md to a zip:
+  docker_backup_<name>_YYYY-MM-DD_HH-MM-SS.zip in current folder.
+  Does NOT include volume data (instructions for that are in README.md).
+
+- docker clone <container> <new-name>
+  Reads image + env + restart policy from source container.
+  Starts a detached clone under new-name.
+  Port bindings are NOT copied (would conflict; user adds -p manually).
+
+- docker watch <container>
+  Streams docker logs -f (tail 20) in foreground.
+  Background thread prints CPU/MEM/NET stats every 5 seconds.
+  Ctrl+C stops both.
+
+- docker size <image>
+  Runs docker history --no-trunc and shows each layer's size + command.
+  Strips /bin/sh -c prefix for readability. Shows total from docker images.
+
+- docker port-check
+  Reads docker-compose.yml (or compose.yml) from current folder.
+  Extracts host:container port pairs (regex). Checks each host port against
+  netstat -ano output. Reports each port as free or IN USE.
+
+22.8 Pass-through
 - Unrecognized docker ... commands are forwarded to real docker CLI.
 
 ============================================================
@@ -806,7 +856,7 @@ Caution:
 - /gitlfs setup
 
 Additional mismatches:
-- projectscan command is routed but calls undefined op_project_scan (fails).
+- projectscan command has been fully removed (handler deleted from handle_command).
 - /qcount route calls missing quick_count in path_index_local.py (fails).
 - Help text mentions download_list and optional output filename for download; parser accepts only:
   - download '<url>' to '<dest_folder>'
@@ -879,6 +929,10 @@ Navigation:
 - pwd
 - list
 - list '<path>'
+- list '<path>' depth <n>
+- list '<path>' only files
+- list '<path>' only dirs
+- list '<path>' pattern <glob>
 
 Search:
 - info '<path>'
@@ -1017,7 +1071,16 @@ Docker:
 - docker networks
 - docker network remove|rm <name>
 - docker clean [all]
+- docker prune-safe
 - docker compose up|down|logs [follow]|build|ps|restart
+- docker wait <name>
+- docker errors <name>
+- docker env run <image>
+- docker backup <name>
+- docker clone <name> <new-name>
+- docker watch <name>
+- docker size <image>
+- docker port-check
 - docker <anything_else> (pass-through)
 
 Update:

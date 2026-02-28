@@ -34,6 +34,15 @@
 #   docker inspect <name>        show container/image details (formatted)
 #   docker ip <name>             show container IP address
 #   docker doctor                check docker installation + daemon status
+#   docker wait <name>           poll until container is running/healthy (max 60s)
+#   docker errors <name>         filter container logs to error/warning lines only
+#   docker env run <image>       run image injecting all vars from .env file
+#   docker prune-safe            show then remove stopped containers + dangling images
+#   docker backup <name>         save container config to a timestamped zip
+#   docker clone <name> <new>    duplicate container (same image + env, no port conflict)
+#   docker watch <name>          stream logs with periodic CPU/MEM stats overlay
+#   docker size <image>          show layer-by-layer size breakdown
+#   docker port-check            check compose file ports vs currently listening ports
 #
 # Pass-through:
 #   Any unrecognised "docker ..." is forwarded to the real docker CLI.
@@ -41,6 +50,12 @@
 import shutil
 import subprocess
 import shlex
+import time
+import datetime
+import zipfile
+import json
+import re
+import threading
 from pathlib import Path
 from typing import Callable, List, Tuple, Optional
 
@@ -493,6 +508,307 @@ def handle_docker_commands(raw: str, low: str, cwd, p: PFunc) -> bool:
             p(f"[yellow]Unknown compose subcommand: {sub}[/yellow]")
             p("[yellow]Usage: docker compose up|down|logs|logs follow|build|ps|restart[/yellow]")
 
+        return True
+
+    # -------------------------------------------------------------------------
+    # docker wait <container>  — poll until running/healthy (max 60s)
+    # -------------------------------------------------------------------------
+    if cmd == "wait":
+        if len(toks) < 3:
+            p("[red]❌ Usage:[/red] docker wait <container>")
+            return True
+        name = _strip_quotes(toks[2])
+        p(f"Waiting for [bold]{name}[/bold] to be ready... (Ctrl+C to cancel)")
+        try:
+            for attempt in range(60):
+                rc_s, status = _docker_run(["inspect", "--format", "{{.State.Status}}", name])
+                if rc_s != 0:
+                    p(f"[red]❌ Container not found:[/red] {name}")
+                    return True
+                status = status.strip()
+                rc_h, health = _docker_run(["inspect", "--format", "{{.State.Health.Status}}", name])
+                health = health.strip() if rc_h == 0 else ""
+                if status == "running":
+                    if health in ("", "healthy"):
+                        suffix = f", health: {health}" if health else ""
+                        p(f"✅ {name} is ready (status: {status}{suffix})")
+                        return True
+                    elif health == "unhealthy":
+                        p(f"[red]❌ {name} is unhealthy — check with: docker errors {name}[/red]")
+                        return True
+                    else:
+                        p(f"  [{attempt+1}s] running, health: {health}...")
+                else:
+                    p(f"  [{attempt+1}s] status: {status}...")
+                time.sleep(1)
+            p(f"[yellow]⚠ Timeout: {name} did not become ready within 60s[/yellow]")
+        except KeyboardInterrupt:
+            p("[yellow]Cancelled.[/yellow]")
+        return True
+
+    # -------------------------------------------------------------------------
+    # docker errors <container>  — filter logs to error/exception lines
+    # -------------------------------------------------------------------------
+    if cmd == "errors":
+        if len(toks) < 3:
+            p("[red]❌ Usage:[/red] docker errors <container>")
+            return True
+        name = _strip_quotes(toks[2])
+        rc, out = _docker_run(["logs", "--tail", "500", name])
+        if rc != 0:
+            p(f"[red]❌ Failed:[/red] {out}")
+            return True
+        keywords = ("error", "fatal", "exception", "traceback", "critical", "failed", "panic", "warn")
+        error_lines = [l for l in out.splitlines() if any(kw in l.lower() for kw in keywords)]
+        if error_lines:
+            p(f"Found [bold]{len(error_lines)}[/bold] notable lines in {name}:")
+            for line in error_lines[-50:]:
+                p(f"[red]{line}[/red]")
+            if len(error_lines) > 50:
+                p(f"[yellow]... showing last 50 of {len(error_lines)} lines[/yellow]")
+        else:
+            p(f"[green]✅ No error/warning lines found in {name}'s logs (last 500 lines).[/green]")
+        return True
+
+    # -------------------------------------------------------------------------
+    # docker env run <image>  — inject .env file vars and run container
+    # -------------------------------------------------------------------------
+    if cmd == "env":
+        sub = toks[2].lower() if len(toks) >= 3 else ""
+        if sub == "run":
+            if len(toks) < 4:
+                p("[red]❌ Usage:[/red] docker env run <image>")
+                return True
+            image = _strip_quotes(toks[3])
+            env_file = (Path(cwd) if cwd else Path(".")) / ".env"
+            env_args: List[str] = []
+            if env_file.exists():
+                env_lines = env_file.read_text(encoding="utf-8").splitlines()
+                count = 0
+                for ev in env_lines:
+                    ev = ev.strip()
+                    if not ev or ev.startswith("#") or "=" not in ev:
+                        continue
+                    env_args += ["-e", ev]
+                    count += 1
+                p(f"Injecting [bold]{count}[/bold] var(s) from {env_file.name} into {image}...")
+            else:
+                p("[yellow]No .env file in current folder — running without extra env vars.[/yellow]")
+            run_args = ["run", "--rm", "-it"] + env_args + [image]
+            p(f"Running {image}... (exit to return to CMC)")
+            try:
+                subprocess.run(["docker"] + run_args)
+            except Exception as e:
+                p(f"[red]❌ Failed:[/red] {e}")
+        else:
+            p("[yellow]Usage: docker env run <image>[/yellow]")
+        return True
+
+    # -------------------------------------------------------------------------
+    # docker prune-safe  — preview then remove stopped containers + dangling images
+    # -------------------------------------------------------------------------
+    if cmd == "prune-safe":
+        rc1, stopped = _docker_run(["ps", "-a", "--filter", "status=exited",
+                                    "--format", "{{.Names}} ({{.Image}})"])
+        rc2, dangling = _docker_run(["images", "-f", "dangling=true",
+                                     "--format", "{{.Repository}}:{{.Tag}} ({{.Size}})"])
+        has_stopped = rc1 == 0 and stopped.strip()
+        has_dangling = rc2 == 0 and dangling.strip()
+        if not has_stopped and not has_dangling:
+            p("[green]✅ Nothing to remove — system is already tidy.[/green]")
+            return True
+        if has_stopped:
+            p("Stopped containers to remove:")
+            for line in stopped.strip().splitlines():
+                p(f"  • {line}")
+        if has_dangling:
+            p("Untagged images to remove:")
+            for line in dangling.strip().splitlines():
+                p(f"  • {line}")
+        p("\nRemoving...")
+        if has_stopped:
+            _docker_run(["container", "prune", "-f"])
+        if has_dangling:
+            _docker_run(["image", "prune", "-f"])
+        p("[green]✅ Safe prune complete.[/green]")
+        p("[yellow](Volumes, networks and in-use images were not touched)[/yellow]")
+        return True
+
+    # -------------------------------------------------------------------------
+    # docker backup <container>  — save container config to timestamped zip
+    # -------------------------------------------------------------------------
+    if cmd == "backup":
+        if len(toks) < 3:
+            p("[red]❌ Usage:[/red] docker backup <container>")
+            return True
+        name = _strip_quotes(toks[2])
+        rc, config_raw = _docker_run(["inspect", name])
+        if rc != 0:
+            p(f"[red]❌ Container not found:[/red] {name}")
+            return True
+        ts = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        zip_name = f"docker_backup_{name}_{ts}.zip"
+        zip_path = (Path(cwd) if cwd else Path(".")) / zip_name
+        rc2, image_name = _docker_run(["inspect", "--format", "{{.Config.Image}}", name])
+        image_name = image_name.strip()
+        readme = (
+            f"# Docker Container Backup\n"
+            f"Container : {name}\n"
+            f"Image     : {image_name}\n"
+            f"Timestamp : {ts}\n\n"
+            f"## Files\n"
+            f"- inspect.json  full container configuration (env, ports, mounts, etc.)\n\n"
+            f"## Restore example\n"
+            f"  docker run --name {name} [add -p/-e from inspect.json] {image_name}\n\n"
+            f"## Volume data\n"
+            f"Volume DATA is NOT included in this backup.\n"
+            f"To backup a named volume manually:\n"
+            f"  docker run --rm -v <vol>:/data alpine tar czf - /data > vol_backup.tar.gz\n"
+        )
+        try:
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("inspect.json", config_raw)
+                zf.writestr("README.md", readme)
+            p(f"✅ Backup saved: {zip_name}")
+            p("[yellow]Note: Only container config included. Volume data requires a separate step.[/yellow]")
+        except Exception as e:
+            p(f"[red]❌ Backup failed:[/red] {e}")
+        return True
+
+    # -------------------------------------------------------------------------
+    # docker clone <container> <new-name>  — duplicate container (same image + env)
+    # -------------------------------------------------------------------------
+    if cmd == "clone":
+        if len(toks) < 4:
+            p("[red]❌ Usage:[/red] docker clone <container> <new-name>")
+            return True
+        src = _strip_quotes(toks[2])
+        dst = _strip_quotes(toks[3])
+        rc, image = _docker_run(["inspect", "--format", "{{.Config.Image}}", src])
+        if rc != 0:
+            p(f"[red]❌ Container not found:[/red] {src}")
+            return True
+        image = image.strip()
+        rc2, env_json = _docker_run(["inspect", "--format", "{{json .Config.Env}}", src])
+        rc3, restart = _docker_run(["inspect", "--format", "{{.HostConfig.RestartPolicy.Name}}", src])
+        restart = restart.strip()
+        run_args = ["run", "-d", "--name", dst]
+        if restart and restart != "no":
+            run_args += ["--restart", restart]
+        try:
+            env_list = json.loads(env_json) if rc2 == 0 else []
+            for ev in env_list:
+                run_args += ["-e", ev]
+        except Exception:
+            pass
+        run_args.append(image)
+        p(f"Cloning [bold]{src}[/bold] → [bold]{dst}[/bold] (image: {image})...")
+        rc_r, out_r = _docker_run(run_args)
+        if rc_r == 0:
+            p(f"✅ Clone created: {dst}")
+            p("[yellow]Tip: Port bindings were NOT copied (would conflict). Add -p manually if needed.[/yellow]")
+        else:
+            p(f"[red]❌ Failed:[/red]\n{out_r}")
+        return True
+
+    # -------------------------------------------------------------------------
+    # docker watch <container>  — live logs + periodic stats overlay
+    # -------------------------------------------------------------------------
+    if cmd == "watch":
+        if len(toks) < 3:
+            p("[red]❌ Usage:[/red] docker watch <container>")
+            return True
+        name = _strip_quotes(toks[2])
+        p(f"Watching [bold]{name}[/bold]... (Ctrl+C to stop)")
+        p("[dim]Stats will appear every 5 seconds between log lines.[/dim]")
+        stop_flag: List[bool] = [False]
+
+        def _stats_loop():
+            while not stop_flag[0]:
+                time.sleep(5)
+                if stop_flag[0]:
+                    break
+                rc_st, st_out = _docker_run(
+                    ["stats", "--no-stream", "--format",
+                     "CPU {{.CPUPerc}}  MEM {{.MemUsage}}  NET {{.NetIO}}", name]
+                )
+                if rc_st == 0:
+                    p(f"[dim]── {st_out.strip()} ──[/dim]")
+
+        t = threading.Thread(target=_stats_loop, daemon=True)
+        t.start()
+        try:
+            _docker_run_live(["logs", "-f", "--tail", "20", name])
+        except KeyboardInterrupt:
+            pass
+        finally:
+            stop_flag[0] = True
+        return True
+
+    # -------------------------------------------------------------------------
+    # docker size <image>  — layer-by-layer size breakdown
+    # -------------------------------------------------------------------------
+    if cmd == "size":
+        if len(toks) < 3:
+            p("[red]❌ Usage:[/red] docker size <image>")
+            return True
+        image = _strip_quotes(toks[2])
+        rc, out = _docker_run(["history", "--no-trunc", "--format",
+                               "{{.Size}}\t{{.CreatedBy}}", image])
+        if rc != 0:
+            p(f"[red]❌ Image not found:[/red] {image}")
+            return True
+        p(f"Layer breakdown for [bold]{image}[/bold]:")
+        for line in out.splitlines():
+            if "\t" in line:
+                sz, layer_cmd = line.split("\t", 1)
+                layer_cmd = layer_cmd.strip()
+                layer_cmd = re.sub(r"^/bin/sh -c (#\(nop\) )?", "", layer_cmd)
+                if len(layer_cmd) > 72:
+                    layer_cmd = layer_cmd[:69] + "..."
+                p(f"  {sz:>10}  {layer_cmd}")
+            elif line.strip():
+                p(f"  {line}")
+        rc2, total_out = _docker_run(["images", "--format", "{{.Size}}", image])
+        if rc2 == 0 and total_out.strip():
+            p(f"\n  [bold]Total: {total_out.strip().splitlines()[0]}[/bold]")
+        return True
+
+    # -------------------------------------------------------------------------
+    # docker port-check  — check compose file ports vs currently listening ports
+    # -------------------------------------------------------------------------
+    if cmd == "port-check":
+        compose_file = None
+        for fname in ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"):
+            cf = (Path(cwd) if cwd else Path(".")) / fname
+            if cf.exists():
+                compose_file = cf
+                break
+        if not compose_file:
+            p("[red]❌ No docker-compose file found in current folder.[/red]")
+            return True
+        text = compose_file.read_text(encoding="utf-8")
+        port_pairs = re.findall(r'"?\'?(\d{2,5}):(\d{2,5})"?\'?', text)
+        if not port_pairs:
+            p("[yellow]No port mappings found in compose file.[/yellow]")
+            return True
+        try:
+            result = subprocess.run(
+                ["netstat", "-ano"], capture_output=True, text=True, timeout=5
+            )
+            listening_text = result.stdout
+        except Exception:
+            listening_text = ""
+        p(f"Port check from [bold]{compose_file.name}[/bold]:")
+        seen: set = set()
+        for host_port, container_port in port_pairs:
+            if host_port in seen:
+                continue
+            seen.add(host_port)
+            in_use = (f":{host_port} " in listening_text or
+                      f":{host_port}\t" in listening_text)
+            status = "[red]IN USE ⚠[/red]" if in_use else "[green]free ✅[/green]"
+            p(f"  {host_port:>5} → {container_port:<5}  {status}")
         return True
 
     # -------------------------------------------------------------------------

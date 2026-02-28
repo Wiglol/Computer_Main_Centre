@@ -3562,10 +3562,16 @@ def handle_command(s: str):
 
         
             # ---------- File & Info operations ----------
-    # list ['path']
-    m = re.match(r"^list(?:\s+'(.+?)')?$", s, re.I)
+    # list ['path'] [depth <n>] [only files|dirs] [pattern <glob>]
+    m = re.match(r"^list(?:\s+'(.+?)')?(?:\s+(.+))?$", s, re.I)
     if m:
-        op_list(m.group(1) if m.group(1) else None); return
+        _lpath = m.group(1) or None
+        _lmod  = (m.group(2) or "").lower().strip()
+        _ldepth   = int(re.search(r"depth\s+(\d+)", _lmod).group(1)) if re.search(r"depth\s+(\d+)", _lmod) else 1
+        _lonly    = "files" if "only files" in _lmod else ("dirs" if "only dirs" in _lmod else None)
+        _lpat_m   = re.search(r"pattern\s+(\S+)", _lmod)
+        _lpattern = _lpat_m.group(1) if _lpat_m else None
+        op_list(_lpath, depth=_ldepth, only=_lonly, pattern=_lpattern); return
 
     # info 'path'
     m = re.match(r"^info\s+'(.+?)'$", s, re.I)
@@ -3963,10 +3969,8 @@ Opening:
 • explore '<folder>'              Open folder in Explorer
 
 Examples:
-  cd C:/Users/Wiggo/Desktop
+  cd 'C:/Users/Wiggo/Desktop'
   cd ..
-  list
-  pwd
   explore 'C:/Users/Wiggo/Downloads'
 """
 
@@ -4033,12 +4037,7 @@ Notes:
 • Run /build first (once per machine, rerun if drives change).
 
 Examples:
-  find 'log'
-  find '.py'
-  find 'test'
-  findext '.json'
-  search 'error'
-  /build C D
+  search 'java.io.IOException'
   /find NBTExplorer 2.8
 """
 
@@ -4055,7 +4054,6 @@ Usage:
   space '<path>' depth <n> report   Write CMC_space_report.txt
 
 Examples:
-  space
   space 'C:/Users/Wiggo/Desktop'
   space 'C:/Servers/MyPack' depth 3
   space 'C:/Downloads' depth 4 report
@@ -4082,9 +4080,8 @@ Tips:
 
 Examples:
   macro add desk = cd '%HOME%/Desktop'
-  macro add publish = copy 'Computer_Main_Centre.py' to 'C:/Public/Computer_Main_Centre.py'
-  macro run desk
-  macro edit desk
+  macro add deploy = batch on, zip 'C:/Project' to 'C:/Backups', git update "deploy %NOW%", batch off
+  macro run deploy
 """
 
 
@@ -4211,23 +4208,11 @@ Notes:
 • If you see an origin containing "<you>", fix it with `git link owner/repo`.
 
 Examples:
-  git upload
-  git update
-  git update "Update 1"
-  git update MyAcc/MyRepo "Update 2"
   git update MyAcc/MyRepo "Update only one file" --add src/main.py
-  git force upload
-  git force update
   git debug update MyAcc/MyRepo "Debugging this push"
-  git download MyAcc/Test123
   git link OrgOrOwner/RepoName
-  git repo list
   git repo delete MyAcc/OldTestRepo
-  git status
-  git doctor
-  git branch list
   git branch create my-feature
-  git branch switch main
 """
 
 
@@ -4245,7 +4230,6 @@ Java:
 • java reload
 
 Examples:
-  java list
   java change 17
 """
 
@@ -4265,7 +4249,6 @@ Supported:
 .py, .exe, .bat, .cmd, .vbs with proper working directory.
 
 Examples:
-  run 'script.py'
   run 'start_server.bat' in 'C:/Servers/Forge'
   run 'mcreator.exe' in 'C:/MCreator_1.9.1/MCreator191'
   run 'C:/Tools/MyApp/app.exe'
@@ -4282,9 +4265,7 @@ Ports & processes:
 • kill <port>                     Kill whatever process is running on that port
 
 Examples:
-  ports
   kill 3000
-  kill 5173
 """
 
     sec10 = """
@@ -4308,7 +4289,6 @@ Flags:
 Examples:
   download 'https://example.com/app.zip' 'app.zip'
   download_list '%HOME%/Desktop/links.txt'
-  search web "java install"
 """
 
 
@@ -4349,13 +4329,8 @@ Dev server (smart launcher — opens browser automatically):
 
 Examples:
   new flask
-  new react
-  setup
-  dev
+  env set DATABASE_URL=postgres://localhost/mydb, dev
   dev build
-  new web
-  env set PORT=3000
-  env check
 """
 
     sec12 = """
@@ -4400,11 +4375,9 @@ Notes:
 
 
 Examples:
-  ai hello, what can you do?
-  ai-model list
-  ai-model current
-  ai-model set llama3.1:8b
-  model set qwen2.5:14b-instruct
+  ai how do I zip this folder and push it to git in one step?
+  ai-model set qwen2.5:14b-instruct
+  model set llama3.1:8b
 """
 
 
@@ -4424,12 +4397,9 @@ Config system:
 • config reset
 
 Examples:
-  batch on
-  dry-run off
-  ssl off
-  config list
-  config set batch on
-  config get space.default_depth
+  dry-run on, delete 'C:/Temp/old_logs'
+  config set space.default_depth 4
+  config get ai.model
 """
 
     sec14 = """
@@ -4483,17 +4453,26 @@ Volumes & Networks:
 Cleanup:
 • docker clean                     Remove stopped containers + dangling images
 • docker clean all                 Full system prune (containers, images, volumes, networks)
+• docker prune-safe                Preview then remove stopped containers + dangling images safely
 
 • docker doctor                    Check Docker installation and daemon status
 
+Power commands:
+• docker wait <name>               Poll until container is running/healthy (max 60s)
+• docker errors <name>             Filter logs to error/warning lines only
+• docker env run <image>           Run image injecting vars from .env file in current folder
+• docker backup <name>             Save container config to a timestamped zip
+• docker clone <name> <new>        Duplicate a container (same image + env, no port conflict)
+• docker watch <name>              Stream logs with periodic CPU/MEM stats overlay
+• docker size <image>              Show layer-by-layer size breakdown
+• docker port-check                Check compose file ports vs currently listening ports
+
 Examples:
-  docker ps
+  docker run postgres:15 -p 5432:5432 -e POSTGRES_PASSWORD=secret -n mydb -d
   docker shell myapp
   docker logs follow myapp
   docker build myapp:v1
-  docker run nginx -p 8080:80 -d
-  docker compose up
-  docker clean
+  docker clone myapp myapp-staging
 """
 
     # ---------- Section Map ----------
@@ -4707,10 +4686,12 @@ def complete_command(text, state):
     "docker build", "docker pull", "docker push", "docker run",
     "docker volumes", "docker volume remove",
     "docker networks", "docker network remove",
-    "docker clean", "docker clean all",
+    "docker clean", "docker clean all", "docker prune-safe",
     "docker compose up", "docker compose down", "docker compose logs",
     "docker compose build", "docker compose ps", "docker compose restart",
     "docker doctor",
+    "docker wait", "docker errors", "docker env run",
+    "docker backup", "docker clone", "docker watch", "docker size", "docker port-check",
 
     # Path index
     "/find", "/qcount", "/build",
@@ -4854,11 +4835,13 @@ def build_completer():
         "docker build", "docker pull", "docker push", "docker run",
         "docker volumes", "docker volume remove",
         "docker networks", "docker network remove",
-        "docker clean", "docker clean all",
+        "docker clean", "docker clean all", "docker prune-safe",
         "docker compose up", "docker compose down", "docker compose logs",
         "docker compose logs follow", "docker compose build",
         "docker compose ps", "docker compose restart",
         "docker doctor",
+        "docker wait", "docker errors", "docker env run",
+        "docker backup", "docker clone", "docker watch", "docker size", "docker port-check",
         # Path index
         "/find", "/qcount", "/build",
         # Java

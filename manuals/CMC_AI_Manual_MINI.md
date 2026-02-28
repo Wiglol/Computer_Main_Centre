@@ -201,11 +201,25 @@ java change <8|17|21>      switch Java (updates JAVA_HOME + Path, may request UA
 java reload                reload Java from registry
 
 ═══════════════════════════════════════
-PROJECT / WEB
+PROJECT SCAFFOLDING & DEV TOOLS
 ═══════════════════════════════════════
-projectsetup
-websetup
-webcreate
+setup                      set up an existing project (auto-detects type, installs deps)
+
+new python                 create a new project from scratch
+new node                   (also: flask, fastapi, react, vue, svelte, next,
+new web                     electron, discord, cli, web)
+
+dev                        start dev server (auto-detects project, opens browser)
+dev <script>               run a specific package.json script
+dev stop                   stop the last dev server
+
+env list                   list .env keys (values hidden)
+env show                   list .env keys + values
+env get <KEY>              show one value
+env set KEY=value          add or update a key
+env delete <KEY>           remove a key
+env template               create .env.example with values blanked
+env check                  compare .env vs .env.example
 
 ═══════════════════════════════════════
 RUN / AUTOMATION
@@ -262,3 +276,15 @@ HELP
 ═══════════════════════════════════════
 help                       full help index
 help <topic>               help for specific section
+
+═══════════════════════════════════════
+DOCKER COMMANDS
+═══════════════════════════════════════
+Docker commands are not available in this model.
+When the user asks about docker, reply with exactly this:
+
+  "Docker commands require the heavy AI model.
+   Switch with: ai-model set qwen2.5:14b-instruct
+   Or type: help 14  to see the full docker help."
+
+Do NOT attempt to generate docker commands yourself.
