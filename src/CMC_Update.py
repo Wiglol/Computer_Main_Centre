@@ -219,15 +219,21 @@ def cmc_update_status_check(
 
     # ── 2. API / SHA path (zip installs + git fallback) ────────────────────
     state = _load_state()
-    installed = state.get("installed_sha")
 
-    # Seed from VERSION.txt if no installed_sha recorded yet
-    if not installed:
-        ver_file = cmc_folder / "UpdateNotes" / "VERSION.txt"
-        if ver_file.exists():
-            v = ver_file.read_text(encoding="utf-8", errors="ignore").strip()
-            if v:
-                installed = v
+    # For zip installs VERSION.txt is baked into the downloaded archive and is
+    # always the ground truth for what is actually on disk.  The state file
+    # (~/.ai_helper/cmc_update.json) persists across installs, so if the user
+    # extracted a fresh zip the state file would still hold the OLD sha and we
+    # would incorrectly report "update_available" on first launch.
+    # Fix: always prefer VERSION.txt when it exists; update the state file so
+    # subsequent runs don't have to re-seed.
+    installed = state.get("installed_sha")
+    ver_file = cmc_folder / "UpdateNotes" / "VERSION.txt"
+    if ver_file.exists():
+        v = ver_file.read_text(encoding="utf-8", errors="ignore").strip()
+        if v:
+            installed = v
+            if state.get("installed_sha") != v:
                 state["installed_sha"] = v
                 _save_state(state)
 
@@ -241,6 +247,21 @@ def cmc_update_status_check(
     return "up_to_date" if str(installed).strip() == str(latest).strip() else "update_available"
 
 
+def consume_update_applied_flag() -> bool:
+    """
+    Returns True (and clears the flag) if a real 'cmc update' was applied since
+    the last launch.  Returns False on a fresh install / plain zip extract.
+
+    Called by maybe_show_update_notes() to decide whether to show the changelog.
+    """
+    state = _load_state()
+    if state.get("update_applied"):
+        state.pop("update_applied")
+        _save_state(state)
+        return True
+    return False
+
+
 def cmc_update_check(
     p,
     repo: str = DEFAULT_REPO,
@@ -251,15 +272,17 @@ def cmc_update_check(
     state = _load_state()
     installed = state.get("installed_sha")
 
-    # Seed from VERSION.txt if nothing recorded (fresh zip install)
-    if not installed and cmc_folder is not None:
+    # Same VERSION.txt-first logic as cmc_update_status_check: always trust the
+    # file on disk over the (potentially stale) state file for zip installs.
+    if cmc_folder is not None:
         ver_file = Path(cmc_folder) / "UpdateNotes" / "VERSION.txt"
         if ver_file.exists():
             v = ver_file.read_text(encoding="utf-8", errors="ignore").strip()
             if v:
                 installed = v
-                state["installed_sha"] = v
-                _save_state(state)
+                if state.get("installed_sha") != v:
+                    state["installed_sha"] = v
+                    _save_state(state)
 
     latest = _latest_sha(repo, branch)
     if not latest:
@@ -335,8 +358,9 @@ def cmc_update_apply(
 
             state = _load_state()
             state["installed_sha"] = sha
+            state["update_applied"] = True
             _save_state(state)
-            
+
             _write_update_notes_version(cmc_folder, sha)
 
             p("✅ Update applied via git.")
@@ -405,8 +429,9 @@ def cmc_update_apply(
             return
 
     state["installed_sha"] = latest
+    state["update_applied"] = True
     _save_state(state)
-    
+
     _write_update_notes_version(cmc_folder, latest)
 
     p("✅ Update applied.")

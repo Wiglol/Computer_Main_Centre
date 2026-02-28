@@ -562,6 +562,21 @@ def maybe_show_update_notes():
         if seen == version:
             return  # already shown for this update
 
+        # Only show the changelog when a real 'cmc update' was run.
+        # On a fresh zip install the version will differ from SEEN_VERSION.txt
+        # (because the zip ships with an older SEEN_VERSION.txt), but no update
+        # was applied — the user doesn't need to see the log immediately.
+        # consume_update_applied_flag() returns True and clears the flag only
+        # when cmc_update_apply() has actually been called.
+        try:
+            from CMC_Update import consume_update_applied_flag
+            if not consume_update_applied_flag():
+                # Fresh install / plain extract — silently mark as seen and skip.
+                seen_file.write_text(version, encoding="utf-8")
+                return
+        except Exception:
+            pass  # If the import fails for any reason, fall through and show normally.
+
         text = notes_file.read_text(encoding="utf-8", errors="ignore").strip()
         if not text:
             # still mark as seen so it doesn't spam
