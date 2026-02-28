@@ -208,6 +208,10 @@ def _check_ollama_alive(timeout: float = 0.5) -> bool:
 _LAST_CMD: str = ""
 _LAST_ERROR: str = ""
 
+# Rolling log of raw commands the user has typed (used as AI context)
+_CMD_LOG: list = []
+_CMD_LOG_MAX = 20
+
 
 # ==========================================================
 # 🔧  Computer Main Centre – Auto-Setup & Dependency Checker
@@ -518,7 +522,8 @@ def show_header():
         print(f"Batch: {'ON' if STATE['batch'] else 'off'}  Dry-Run: {'ON' if STATE['dry_run'] else 'off'}  AI: {ai_model}")
         print(f"CMC: {upd}")
 
-_FIRST_RUN_SENTINEL = DATA_DIR / ".cmc_first_run_done"
+_FIRST_RUN_SENTINEL    = DATA_DIR / ".cmc_first_run_done"
+_AI_FIX_TIP_SENTINEL   = DATA_DIR / ".cmc_ai_fix_tip_shown"
 
 def is_first_run() -> bool:
     """Return True if this is the very first CMC launch (sentinel file absent)."""
@@ -2678,6 +2683,17 @@ def suggest_commands(s: str):
     cands = [h for h in COMMAND_HINTS if h.startswith(s)]
     if not cands:
         p(f"Unknown command: {s}")
+        # Let ai fix know what was typed even though no exception was raised
+        global _LAST_CMD, _LAST_ERROR
+        _LAST_CMD = s
+        _LAST_ERROR = "Unknown command"
+        # Show the ai fix tip only once, ever
+        if not _AI_FIX_TIP_SENTINEL.exists():
+            p("[dim]Tip: type 'ai fix' to get a suggestion.[/dim]" if RICH else "Tip: type 'ai fix' to get a suggestion.")
+            try:
+                _AI_FIX_TIP_SENTINEL.touch()
+            except Exception:
+                pass
         return
     if RICH:
         t = Table(title="Suggestions")
@@ -2999,12 +3015,14 @@ def handle_command(s: str):
 
         sub = user_query.lower()
 
-        # ai fix — diagnose the last failed command
+        # ai fix — diagnose the last failed or unrecognised command
         if sub == "fix":
-            if not _LAST_ERROR:
-                p("[yellow]No recent error to fix.[/yellow]")
+            if not _LAST_CMD:
+                p("[yellow]Nothing to fix yet — type a command first.[/yellow]" if RICH else "Nothing to fix yet.")
                 return
             try:
+                STATE["recent_commands"] = list(_CMD_LOG)
+                STATE["last_issue"] = {"command": _LAST_CMD, "error": _LAST_ERROR or ""}
                 reply_text = run_ai_fix(_LAST_CMD, _LAST_ERROR, str(CWD), STATE, MACROS, ALIASES)
                 p(reply_text)
             except Exception as e:
@@ -3022,6 +3040,11 @@ def handle_command(s: str):
 
         try:
             cwd_str = str(CWD)
+            STATE["recent_commands"] = list(_CMD_LOG)
+            if _LAST_CMD:
+                STATE["last_issue"] = {"command": _LAST_CMD, "error": _LAST_ERROR or ""}
+            else:
+                STATE.pop("last_issue", None)
             reply_text = run_ai_assistant(user_query, cwd_str, STATE, MACROS, ALIASES)
             p(reply_text)
         except Exception as e:
@@ -3160,18 +3183,6 @@ def handle_command(s: str):
         except Exception as e:
             p(f"[red]❌ Env error:[/red] {e}")
         return
-
-    # ---------- Project Scan ----------
-    m = re.match(r"^projectscan$", s, re.I)
-    if m:
-        try:
-            op_project_scan()
-        except Exception as e:
-            p(f"[red]❌ Project scan failed:[/red] {e}")
-        return
-        
-        
-
 
 
 
@@ -4980,6 +4991,10 @@ def main():
                 break
 
             try:
+                # Log every command so the AI can see recent context
+                _CMD_LOG.append(part)
+                if len(_CMD_LOG) > _CMD_LOG_MAX:
+                    _CMD_LOG.pop(0)
                 handle_command(part)
             except SystemExit:
                 raise

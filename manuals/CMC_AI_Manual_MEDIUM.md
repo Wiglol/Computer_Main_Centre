@@ -114,15 +114,22 @@ Extended list options:
 
 ## 3.1 Reading
 - `read '<file>'` — print full file contents
+- `read '<file>' [head=<n>]` — print only the first N lines
 
 ## 3.2 Creating
 - `create folder '<name>' in '<path>'`
 - `create file '<name>' in '<path>'`
+- `create file '<name>' in '<path>' with text="..."` — create with initial content
 
 ## 3.3 Writing
-- `write '<file>' <text>`
+- `write '<file>' text="..."` — overwrite file (use `"` or `'` around the value)
   - confirms overwrite
   - respects dry-run
+
+Example:
+```cmc
+write 'notes.txt' text="hello world"
+```
 
 ## 3.4 Copy / Move / Rename
 - `copy '<src>' to '<dst>'`
@@ -325,6 +332,9 @@ Timing:
 Input automation (use only if user explicitly asks):
 - `sendkeys "text{ENTER}"`
 
+Console output (useful in macros):
+- `echo <text>` — print text to the console
+
 ---
 
 # ===========================
@@ -422,6 +432,25 @@ ai-model set qwen2.5:14b-instruct
 
 - `sysinfo` — display full system info panel (CPU, RAM, OS, drives, Python, Java)
 - `sysinfo save '<file>'` — save sysinfo to a text file
+
+---
+
+# ===========================
+# 13b. PORTS & PROCESSES
+# ===========================
+
+- `ports` — show all listening TCP ports with their PID and process name
+- `kill <port>` — kill the process running on the specified port number
+
+Notes:
+- Run CMC as admin for a complete list of all system ports
+- Useful for stopping dev servers or freeing up stuck ports
+
+Example:
+```cmc
+ports
+kill 3000
+```
 
 ---
 

@@ -59,11 +59,14 @@ explore '<folder>'        open folder in Windows Explorer
 FILES
 ═══════════════════════════════════════
 read '<file>'              print full file contents
+read '<file>' [head=<n>]   print first N lines only
 
 create folder '<name>' in '<path>'
 create file '<name>' in '<path>'
+create file '<name>' in '<path>' with text="..."  (creates with initial content)
 
-write '<file>' <text>      overwrite file (confirms; respects dry-run)
+write '<file>' text="..."  overwrite file (confirms; respects dry-run)
+echo <text>                print text to console (useful in macros)
 
 copy '<src>' to '<dst>'
 move '<src>' to '<dst>'
@@ -246,6 +249,13 @@ SYSINFO
 ═══════════════════════════════════════
 sysinfo                    show system info panel
 sysinfo save '<file>'      save sysinfo to file
+
+═══════════════════════════════════════
+PORTS / PROCESSES
+═══════════════════════════════════════
+ports                      show all listening ports with PID and process name
+kill <port>                kill the process running on that port
+Examples: kill 3000 / kill 5173
 
 ═══════════════════════════════════════
 HELP
