@@ -1,5 +1,6 @@
 {
   "ai": {
+    "backend": "claude-code",
     "model": "qwen2.5:14b-instruct"
   },
   "batch": false,

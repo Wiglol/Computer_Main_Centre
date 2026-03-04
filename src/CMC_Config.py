@@ -29,7 +29,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "dry_run": False,
     "ssl_verify": True,
     "ai": {
-        "model": "llama3.1:8b",
+        "model":   "llama3.1:8b",
+        "backend": "ollama",
     },
     "space": {
         "default_depth": 2,

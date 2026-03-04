@@ -1,13 +1,31 @@
 """
 assistant_core.py — Embedded AI assistant integration for Computer Main Centre (CMC).
 
-This variant talks to a LOCAL Ollama server running on http://localhost:11434
-(using the standard /api/chat endpoint).
+Supports multiple AI backends:
+  • Ollama (local, default)       — http://localhost:11434/api/chat
+  • Anthropic (Claude)            — https://api.anthropic.com/v1/messages
+  • OpenAI (ChatGPT / Codex)      — https://api.openai.com/v1/chat/completions
+                                    https://api.openai.com/v1/responses  (Codex only)
+  • OpenRouter                    — https://openrouter.ai/api/v1/chat/completions
+
+Active backend is stored in CMC_Config.json under ai.backend.
+API keys are stored in ~/.ai_helper/api_keys.json (outside the repo).
+Environment variables ANTHROPIC_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY
+take precedence over stored keys.
 
 Public entry points used by Computer_Main_Centre.py:
     run_ai_assistant(user_query, cwd, state, macros, aliases) -> str
     run_ai_fix(last_cmd, last_error, cwd, state, macros, aliases) -> str
     clear_history() -> None
+
+Key management (called by Computer_Main_Centre.py command handlers):
+    get_api_key(backend) -> str | None
+    set_api_key(backend, key) -> None
+    clear_api_key(backend) -> None
+    get_active_backend() -> str
+    set_active_backend(backend) -> None
+    resolve_model_name(name) -> str
+    detect_backend_for_model(model) -> str
 """
 
 from __future__ import annotations
@@ -153,7 +171,9 @@ def build_context_blob(
 
 
 def _is_large_model() -> bool:
-    """True for 14b+ models that can follow richer, more nuanced instructions."""
+    """True for 14b+ Ollama models, or any cloud backend (always gets the full manual)."""
+    if get_active_backend() != "ollama":
+        return True
     model = _get_active_model().lower()
     return any(x in model for x in ("14b", "32b", "72b", "70b"))
 
@@ -203,7 +223,7 @@ def _build_prompt_prefix_small(ctx: str) -> str:
 
 def _build_prompt_prefix_large(ctx: str) -> str:
     """
-    Prefix for large models (14b+).
+    Prefix for large models (14b+) and all cloud backends.
     Only shows correct syntax — no WRONG examples, as models learn from
     every pattern they see regardless of the label attached to it.
     The mandatory rules are repeated as a short reminder at the END of the
@@ -269,8 +289,8 @@ def build_system_prompt(
 ) -> str:
     """
     Build the full system prompt for the active model.
-    Large models (14b+) get a richer, more nuanced prefix.
-    Small models (≤8b) get a terse, punchy prefix with explicit examples.
+    Large models (14b+) and cloud backends get a richer, more nuanced prefix.
+    Small Ollama models (≤8b) get a terse, punchy prefix with explicit examples.
     """
     ctx    = build_context_blob(cwd, state, macros, aliases)
     manual = load_cmc_manual(_active_manual_path())
@@ -307,48 +327,202 @@ def _get_active_model() -> str:
 
 
 def _active_manual_path() -> Path:
-    """Choose correct manual depending on the active model."""
-    model = _get_active_model().lower()
+    """
+    Choose the correct manual based on the active backend and model.
+
+    Three tiers:
+      LARGE  (AI_Manual.md)             — top-tier cloud: anthropic, openai, claude-code
+      MEDIUM (CMC_AI_Manual_MEDIUM.md)  — openrouter + Ollama 14b/32b/70b/72b
+      MINI   (CMC_AI_Manual_MINI.md)    — small Ollama models (≤8b)
+    """
     here = Path(__file__).resolve().parent.parent
     manuals_dir = here / "manuals"
 
-    if any(x in model for x in ("14b", "32b", "72b", "70b")):
+    backend = get_active_backend()
+
+    if backend in ("anthropic", "openai", "claude-code"):
+        name = "AI_Manual.md"
+    elif backend == "openrouter":
         name = "CMC_AI_Manual_MEDIUM.md"
     else:
-        name = "CMC_AI_Manual_MINI.md"
+        # Ollama — pick by model size
+        model = _get_active_model().lower()
+        if any(x in model for x in ("14b", "32b", "72b", "70b")):
+            name = "CMC_AI_Manual_MEDIUM.md"
+        else:
+            name = "CMC_AI_Manual_MINI.md"
 
     path = manuals_dir / name
     if path.exists():
         return path
-    return here / name
+    # Fallback: MEDIUM if LARGE is somehow missing
+    fallback = manuals_dir / "CMC_AI_Manual_MEDIUM.md"
+    return fallback if fallback.exists() else manuals_dir / "CMC_AI_Manual_MINI.md"
 
 
 # ---------------------------------------------------------------------------
-# Ollama backend
+# API key storage  (~/.ai_helper/api_keys.json — outside the repo)
+# ---------------------------------------------------------------------------
+
+_KEYS_PATH = Path.home() / ".ai_helper" / "api_keys.json"
+
+# Maps backend name → environment variable that overrides stored key
+_ENV_KEY_MAP: Dict[str, str] = {
+    "anthropic":  "ANTHROPIC_API_KEY",
+    "openai":     "OPENAI_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+}
+
+
+def _load_keys() -> Dict[str, str]:
+    try:
+        return json.loads(_KEYS_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_keys(keys: Dict[str, str]) -> None:
+    _KEYS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _KEYS_PATH.write_text(json.dumps(keys, indent=2), encoding="utf-8")
+
+
+def get_api_key(backend: str) -> Optional[str]:
+    """Return API key for *backend*. Env var takes precedence over stored key."""
+    env_var = _ENV_KEY_MAP.get(backend)
+    if env_var:
+        val = os.getenv(env_var)
+        if val:
+            return val
+    return _load_keys().get(backend) or None
+
+
+def set_api_key(backend: str, key: str) -> None:
+    """Store API key for *backend* in ~/.ai_helper/api_keys.json."""
+    keys = _load_keys()
+    keys[backend] = key
+    _save_keys(keys)
+
+
+def clear_api_key(backend: str) -> None:
+    """Remove stored API key for *backend*."""
+    keys = _load_keys()
+    keys.pop(backend, None)
+    _save_keys(keys)
+
+
+# ---------------------------------------------------------------------------
+# Backend selection + model aliases
+# ---------------------------------------------------------------------------
+
+VALID_BACKENDS = ("ollama", "anthropic", "openai", "openrouter", "claude-code")
+
+# Friendly aliases → full model IDs
+_MODEL_ALIASES: Dict[str, str] = {
+    "claude-code":    "claude-code",       # uses local claude CLI — no API key needed
+    "claude":         "claude-sonnet-4-6",
+    "claude-sonnet":  "claude-sonnet-4-6",
+    "claude-opus":    "claude-opus-4-6",
+    "claude-haiku":   "claude-haiku-4-5",
+    "chatgpt":        "gpt-5.2",
+    "gpt":            "gpt-5.2",
+    "gpt-5":          "gpt-5.2",
+    "codex":          "gpt-5.3-codex",
+}
+
+
+def resolve_model_name(name: str) -> str:
+    """Expand a friendly alias to the full model ID, or return name unchanged."""
+    return _MODEL_ALIASES.get(name.lower(), name)
+
+
+def detect_backend_for_model(model: str) -> str:
+    """
+    Guess the correct backend from a model name:
+      claude-code           → claude-code  (local CLI, no API key needed)
+      claude* / anthropic*  → anthropic
+      gpt* / codex* / o1*   → openai
+      contains '/'          → openrouter  (e.g. "meta-llama/llama-3.1-8b")
+      anything else         → ollama
+    """
+    m = model.lower()
+    if m == "claude-code":
+        return "claude-code"
+    if m.startswith(("claude", "anthropic")):
+        return "anthropic"
+    if m.startswith(("gpt", "codex", "o1-", "o3-", "o4-")):
+        return "openai"
+    if "/" in m:
+        return "openrouter"
+    return "ollama"
+
+
+def get_active_backend() -> str:
+    """Return the currently active backend (default: ollama)."""
+    try:
+        import CMC_Config
+        cfg = CMC_Config.load_config()
+        return cfg.get("ai", {}).get("backend", "ollama")
+    except Exception:
+        return "ollama"
+
+
+def set_active_backend(backend: str) -> None:
+    """Persist the chosen backend in CMC_Config.json."""
+    try:
+        import CMC_Config
+        cfg = CMC_Config.load_config()
+        cfg = CMC_Config.set_config_value(cfg, "ai.backend", backend)
+        CMC_Config.save_config(cfg)
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# HTTP helper
+# ---------------------------------------------------------------------------
+
+def _http_post(url: str, headers: Dict[str, str], payload: Dict) -> Dict:
+    """POST *payload* as JSON to *url*, return parsed response dict."""
+    try:
+        import requests  # type: ignore
+    except ImportError:
+        raise RuntimeError(
+            "The 'requests' library is required.\n"
+            "Run: pip install requests"
+        )
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=120)
+    except Exception as exc:
+        raise RuntimeError(f"Network error contacting {url}:\n{exc}") from exc
+    if resp.status_code not in (200, 201):
+        raise RuntimeError(f"HTTP {resp.status_code} from {url}:\n{resp.text[:600]}")
+    try:
+        return resp.json()
+    except Exception as exc:
+        raise RuntimeError(f"Invalid JSON from {url}: {resp.text[:400]}") from exc
+
+
+# ---------------------------------------------------------------------------
+# Backend callers
 # ---------------------------------------------------------------------------
 
 _OLLAMA_URL = os.getenv("CMC_AI_OLLAMA_URL", "http://localhost:11434/api/chat")
 
 
-def _call_ai_backend(messages: List[Dict[str, str]]) -> str:
-    """
-    Call the Ollama /api/chat endpoint with the given messages list and return
-    the assistant reply as a plain string.
-    """
+def _call_ollama(messages: List[Dict[str, str]]) -> str:
+    """Call the local Ollama /api/chat endpoint."""
     try:
         import requests  # type: ignore
-    except Exception as exc:
+    except ImportError:
         raise RuntimeError(
             "The 'requests' library is required but is not installed.\n"
             "Run: pip install requests"
-        ) from exc
-
+        )
     payload = {
         "model": _get_active_model(),
         "messages": messages,
         "stream": False,
     }
-
     try:
         resp = requests.post(_OLLAMA_URL, json=payload, timeout=120)
     except Exception as exc:
@@ -356,20 +530,276 @@ def _call_ai_backend(messages: List[Dict[str, str]]) -> str:
             f"Could not reach Ollama at {_OLLAMA_URL}. Is Ollama running?\n"
             "Try starting the Ollama app, or check CMC_AI_OLLAMA_URL."
         ) from exc
-
     if resp.status_code != 200:
         raise RuntimeError(f"Ollama HTTP {resp.status_code}: {resp.text[:400]}")
-
     try:
         data = resp.json()
     except Exception as exc:
         raise RuntimeError(f"Failed to decode Ollama JSON: {resp.text[:400]}") from exc
-
     msg = data.get("message") or {}
     content = msg.get("content")
     if not isinstance(content, str):
         raise RuntimeError(f"Ollama reply did not contain assistant content: {data!r}")
     return content.strip()
+
+
+def _call_anthropic(messages: List[Dict[str, str]]) -> str:
+    """Call Anthropic /v1/messages API (Claude models)."""
+    key = get_api_key("anthropic")
+    if not key:
+        raise RuntimeError(
+            "No Anthropic API key configured.\n"
+            "Run:  ai key set anthropic <your-key>\n"
+            "Or set the ANTHROPIC_API_KEY environment variable."
+        )
+    # Anthropic requires system content as a separate top-level field
+    system_parts: List[str] = []
+    user_messages: List[Dict[str, str]] = []
+    for m in messages:
+        if m["role"] == "system":
+            system_parts.append(m["content"])
+        else:
+            user_messages.append(m)
+
+    headers = {
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+    payload: Dict[str, Any] = {
+        "model": _get_active_model(),
+        "max_tokens": 4096,
+        "messages": user_messages,
+    }
+    if system_parts:
+        payload["system"] = "\n".join(system_parts)
+
+    data = _http_post("https://api.anthropic.com/v1/messages", headers, payload)
+    try:
+        return data["content"][0]["text"].strip()
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError(f"Unexpected Anthropic response shape: {data!r}") from exc
+
+
+def _call_openai(messages: List[Dict[str, str]]) -> str:
+    """Call OpenAI Chat Completions (or Responses API for Codex models)."""
+    key = get_api_key("openai")
+    if not key:
+        raise RuntimeError(
+            "No OpenAI API key configured.\n"
+            "Run:  ai key set openai <your-key>\n"
+            "Or set the OPENAI_API_KEY environment variable."
+        )
+    model = _get_active_model()
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "content-type": "application/json",
+    }
+    # Codex models use the Responses API
+    if "codex" in model.lower():
+        payload: Dict[str, Any] = {
+            "model": model,
+            "input": messages,
+            "max_output_tokens": 4096,
+        }
+        data = _http_post("https://api.openai.com/v1/responses", headers, payload)
+        try:
+            return data["output"][0]["content"][0]["text"].strip()
+        except (KeyError, IndexError, TypeError) as exc:
+            raise RuntimeError(f"Unexpected OpenAI Responses API shape: {data!r}") from exc
+    else:
+        payload = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": 4096,
+        }
+        data = _http_post("https://api.openai.com/v1/chat/completions", headers, payload)
+        try:
+            return data["choices"][0]["message"]["content"].strip()
+        except (KeyError, IndexError, TypeError) as exc:
+            raise RuntimeError(f"Unexpected OpenAI response shape: {data!r}") from exc
+
+
+def _call_openrouter(messages: List[Dict[str, str]]) -> str:
+    """Call OpenRouter's OpenAI-compatible endpoint."""
+    key = get_api_key("openrouter")
+    if not key:
+        raise RuntimeError(
+            "No OpenRouter API key configured.\n"
+            "Run:  ai key set openrouter <your-key>\n"
+            "Or set the OPENROUTER_API_KEY environment variable."
+        )
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "content-type": "application/json",
+        "HTTP-Referer": "https://github.com/Wiglol/Computer_Main_Centre",
+        "X-Title": "CMC (Computer Main Centre)",
+    }
+    payload: Dict[str, Any] = {
+        "model": _get_active_model(),
+        "messages": messages,
+        "max_tokens": 4096,
+    }
+    data = _http_post("https://openrouter.ai/api/v1/chat/completions", headers, payload)
+    try:
+        return data["choices"][0]["message"]["content"].strip()
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError(f"Unexpected OpenRouter response shape: {data!r}") from exc
+
+
+def get_codex_auth_info() -> Dict[str, Any]:
+    """
+    Read Codex CLI auth.json and return info about how it is authenticated.
+    Returns a dict with keys:
+      "found"      : bool — whether any codex config was found
+      "auth_mode"  : str  — e.g. "chatgpt", "api_key", or ""
+      "api_key"    : str | None — the actual sk-... key if present
+    """
+    import re
+
+    auth_path = Path.home() / ".codex" / "auth.json"
+    if auth_path.exists():
+        try:
+            data = json.loads(auth_path.read_text(encoding="utf-8"))
+            auth_mode = data.get("auth_mode", "")
+            # Try to find a real sk-... API key
+            api_key: Optional[str] = None
+            for field in ("api_key", "openai_api_key", "OPENAI_API_KEY", "apiKey", "key"):
+                val = data.get(field)
+                if isinstance(val, str) and val.startswith("sk-"):
+                    api_key = val
+                    break
+            return {"found": True, "auth_mode": auth_mode, "api_key": api_key}
+        except Exception:
+            pass
+
+    # Fallback: check config.toml for an api_key line
+    config_path = Path.home() / ".codex" / "config.toml"
+    if config_path.exists():
+        try:
+            text = config_path.read_text(encoding="utf-8")
+            match = re.search(r'api_key\s*=\s*["\']?(sk-[A-Za-z0-9\-_]+)["\']?', text)
+            if match:
+                return {"found": True, "auth_mode": "api_key", "api_key": match.group(1)}
+        except Exception:
+            pass
+
+    return {"found": False, "auth_mode": "", "api_key": None}
+
+
+def get_codex_api_key() -> Optional[str]:
+    """
+    Return the OpenAI API key from the Codex CLI config, or None.
+    Only returns a key if one is actually stored (not subscription-based auth).
+    """
+    return get_codex_auth_info().get("api_key")
+
+
+def _call_claude_code(messages: List[Dict[str, str]]) -> str:
+    """
+    Call Claude Code CLI as a subprocess using `claude -p`.
+    Uses the user's existing Claude Code authentication — no API key needed.
+    The full CMC system prompt is passed via --system-prompt-file.
+    Conversation history is embedded in the user query text.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    # Find the claude executable (may be claude.cmd on Windows)
+    claude_cmd = (
+        shutil.which("claude")
+        or shutil.which("claude.cmd")
+        or shutil.which("claude.exe")
+    )
+    if not claude_cmd:
+        raise RuntimeError(
+            "Claude Code CLI ('claude') not found in PATH.\n"
+            "Make sure Claude Code is installed and `claude` is accessible from the terminal."
+        )
+
+    # Separate system prompt from conversation messages
+    system_parts: List[str] = []
+    conversation: List[Dict[str, str]] = []
+    for m in messages:
+        if m["role"] == "system":
+            system_parts.append(m["content"])
+        else:
+            conversation.append(m)
+
+    # Build the query text — embed prior conversation so follow-ups work
+    if len(conversation) > 1:
+        history_lines: List[str] = []
+        for m in conversation[:-1]:
+            label = "User" if m["role"] == "user" else "Assistant"
+            history_lines.append(f"[{label}]:\n{m['content']}")
+        history_block = "\n\n".join(history_lines)
+        current = conversation[-1]["content"] if conversation else ""
+        user_query = (
+            f"[PRIOR CONVERSATION — for context only]\n{history_block}\n\n"
+            f"[CURRENT QUESTION]\n{current}"
+        )
+    else:
+        user_query = conversation[-1]["content"] if conversation else ""
+
+    # Write system prompt to a temp file (avoids command-line length limits)
+    system_text = "\n".join(system_parts)
+    tmp_path: Optional[str] = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False, encoding="utf-8"
+        ) as tmp:
+            tmp.write(system_text)
+            tmp_path = tmp.name
+
+        result = subprocess.run(
+            [
+                claude_cmd,
+                "-p", user_query,
+                "--system-prompt-file", tmp_path,
+                "--output-format", "text",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+    if result.returncode != 0:
+        err = (result.stderr or result.stdout or "").strip()[:500]
+        raise RuntimeError(
+            f"claude CLI exited with code {result.returncode}.\n"
+            f"Make sure you are logged in (`claude` works in your terminal).\n"
+            f"Details: {err}"
+        )
+
+    output = result.stdout.strip()
+    if not output:
+        raise RuntimeError(
+            "claude CLI returned no output. "
+            "Try running `claude -p \"hello\"` in your terminal to verify it works."
+        )
+    return output
+
+
+def _call_ai_backend(messages: List[Dict[str, str]]) -> str:
+    """Route to the correct backend based on ai.backend config."""
+    backend = get_active_backend()
+    if backend == "anthropic":
+        return _call_anthropic(messages)
+    elif backend == "openai":
+        return _call_openai(messages)
+    elif backend == "openrouter":
+        return _call_openrouter(messages)
+    elif backend == "claude-code":
+        return _call_claude_code(messages)
+    else:
+        return _call_ollama(messages)
 
 
 # ---------------------------------------------------------------------------
@@ -480,9 +910,9 @@ if __name__ == "__main__":  # pragma: no cover
     macros: Dict[str, str] = {}
     aliases: Dict[str, str] = {}
 
-    print("assistant_core demo shell (Ollama).")
-    print("Model:", _get_active_model())
-    print("Ollama URL:", _OLLAMA_URL)
+    backend = get_active_backend()
+    model   = _get_active_model()
+    print(f"assistant_core demo shell — backend: {backend}, model: {model}")
     print("Type 'clear' to reset history. Ctrl+C to exit.\n")
 
     try:

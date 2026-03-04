@@ -2664,7 +2664,10 @@ def op_kill_port(port: int, p) -> None:
 # ---------- Suggestions for partial commands ----------
 COMMAND_HINTS = [
     "pwd","cd","back","home","list","info","find","findext","recent","biggest","search",
-    "create file","create folder","write","read","move","copy","rename","delete", "ai-model list", "ai-model current" , "ai-model set <model>" , "model list" , "model current" , "model set <model>",
+    "create file","create folder","write","read","move","copy","rename","delete",
+    "ai-model list", "ai-model current", "ai-model set <model>", "model list", "model current", "model set <model>",
+    "ai backend list", "ai backend set <name>", "ai backend current",
+    "ai key set <backend> <key>", "ai key clear <backend>", "ai key detect",
     "zip","unzip","open","explore","backup","run",
     "download","downloadlist","open url",
     "batch on","batch off","dry-run on","dry-run off","ssl on","ssl off","status","log","undo",
@@ -2935,19 +2938,100 @@ def handle_command(s: str):
             return
 
         if sub == "current":
-            p(f"Current AI model: {get_ai_model()}")
+            cur_model = get_ai_model()
+            try:
+                import assistant_core as _ac
+                cur_backend = _ac.get_active_backend()
+            except Exception:
+                cur_backend = "ollama"
+            p(f"AI model:   {cur_model}")
+            p(f"Backend:    {cur_backend}")
             return
 
         if sub == "set":
             if len(parts) < 3:
-                p("[red]Missing model name.[/red] Example: ai-model set qwen2.5:7b-instruct")
+                p("[red]Missing model name.[/red]  Example: ai-model set claude")
+                p("  Aliases: claude, claude-opus, claude-haiku, codex, chatgpt, gpt")
+                p("  Or use a full model ID: ai-model set qwen2.5:14b-instruct")
                 return
-            new_model = parts[2].strip()
+            raw_name  = " ".join(parts[2:]).strip()
 
-            # Persist model in config on disk (load -> set -> save -> verify)
+            # Resolve friendly alias → full model ID, detect backend
+            try:
+                import assistant_core as _ac
+                new_model  = _ac.resolve_model_name(raw_name)
+                new_backend = _ac.detect_backend_for_model(new_model)
+            except Exception:
+                new_model  = raw_name
+                new_backend = "ollama"
+
+            # claude-code uses the local CLI — no API key needed, just verify it works
+            if new_backend == "claude-code":
+                import shutil as _shutil
+                if not (_shutil.which("claude") or _shutil.which("claude.cmd")):
+                    p("[red]Claude Code CLI not found in PATH.[/red]")
+                    p("Make sure Claude Code is installed and `claude` works in your terminal.")
+                    return
+                # No key check needed — falls through to save model + backend
+
+            # For API backends: check key; try auto-detect for openai; prompt if still missing
+            elif new_backend not in ("ollama",):
+                try:
+                    import assistant_core as _ac
+                    existing_key = _ac.get_api_key(new_backend)
+                except Exception:
+                    existing_key = None
+                if not existing_key:
+                    # For openai: try to auto-detect from Codex CLI config first
+                    if new_backend == "openai":
+                        try:
+                            import assistant_core as _ac
+                            detected = _ac.get_codex_api_key()
+                        except Exception:
+                            detected = None
+                        if detected:
+                            masked = detected[:8] + "..." + detected[-4:]
+                            p(f"[green]Found OpenAI key in Codex CLI config:[/green] {masked}")
+                            p("Use this key? (yes / no)")
+                            try:
+                                answer = input("  > ").strip().lower()
+                            except Exception:
+                                answer = ""
+                            if answer in ("yes", "y"):
+                                try:
+                                    import assistant_core as _ac
+                                    _ac.set_api_key("openai", detected)
+                                    existing_key = detected
+                                    p("[green]Key saved.[/green]")
+                                except Exception as e:
+                                    p(f"[red]Failed to save key:[/red] {e}")
+                                    return
+                            else:
+                                p("[yellow]Skipped auto-detected key.[/yellow]")
+
+                    if not existing_key:
+                        p(f"[yellow]Backend:[/yellow] {new_backend}  (model: {new_model})")
+                        p(f"No API key configured for [bold]{new_backend}[/bold].")
+                        p("Paste your key below (or press Enter to cancel):")
+                        try:
+                            typed_key = input("  Key: ").strip()
+                        except Exception:
+                            typed_key = ""
+                        if not typed_key:
+                            p("[yellow]Cancelled — model not changed.[/yellow]")
+                            return
+                        try:
+                            import assistant_core as _ac
+                            _ac.set_api_key(new_backend, typed_key)
+                            p(f"[green]Key saved for {new_backend}.[/green]")
+                        except Exception as e:
+                            p(f"[red]Failed to save key:[/red] {e}")
+                            return
+
+            # Persist model + backend in config
             try:
                 from CMC_Config import load_config as _cfg_load, save_config as _cfg_save
-                cfg_dir = Path(__file__).parent
+                cfg_dir  = Path(__file__).parent
                 cfg_path = cfg_dir / "CMC_Config.json"
 
                 cfg = _cfg_load(cfg_dir) if callable(_cfg_load) else {}
@@ -2955,7 +3039,8 @@ def handle_command(s: str):
                     cfg = {}
                 if not isinstance(cfg.get("ai"), dict):
                     cfg["ai"] = {}
-                cfg["ai"]["model"] = new_model
+                cfg["ai"]["model"]   = new_model
+                cfg["ai"]["backend"] = new_backend
 
                 if callable(_cfg_save):
                     _cfg_save(cfg, cfg_dir)
@@ -2973,20 +3058,22 @@ def handle_command(s: str):
                 p(f"[red]Failed to save AI model to config.[/red] {e}")
                 return
 
-            # Sync assistant runtime if available
+            # Sync assistant runtime
             try:
-                import assistant_core
-                if hasattr(assistant_core, "_OLLAMA_MODEL"):
-                    assistant_core._OLLAMA_MODEL = new_model
-                if hasattr(assistant_core, "clear_manual_cache"):
-                    assistant_core.clear_manual_cache()
-                if hasattr(assistant_core, "clear_history"):
-                    assistant_core.clear_history()
+                import assistant_core as _ac
+                if hasattr(_ac, "clear_manual_cache"):
+                    _ac.clear_manual_cache()
+                if hasattr(_ac, "clear_history"):
+                    _ac.clear_history()
             except Exception:
                 pass
 
-            p(f"[green]AI model updated and saved:[/green] {new_model}")
-            p("[dim]AI conversation history cleared (new model).[/dim]")
+            if new_model != raw_name:
+                p(f"[green]AI model:[/green] {new_model}  [dim](alias: {raw_name})[/dim]")
+            else:
+                p(f"[green]AI model:[/green] {new_model}")
+            p(f"[green]Backend:[/green]  {new_backend}")
+            p("[dim]AI conversation history cleared.[/dim]")
             return
 
 
@@ -3014,6 +3101,132 @@ def handle_command(s: str):
             user_query = user_query[1:-1].strip()
 
         sub = user_query.lower()
+
+        # ── ai backend … ──────────────────────────────────────────────────
+        if sub.startswith("backend"):
+            if not HAVE_ASSISTANT:
+                p("[yellow]AI assistant not configured.[/yellow]")
+                return
+            try:
+                import assistant_core as _ac
+            except Exception as e:
+                p(f"[red]Could not load assistant_core:[/red] {e}")
+                return
+
+            be_parts = user_query.split()
+            be_sub   = be_parts[1].lower() if len(be_parts) > 1 else "list"
+
+            if be_sub == "list":
+                cur = _ac.get_active_backend()
+                for b in _ac.VALID_BACKENDS:
+                    if b in ("ollama", "claude-code"):
+                        key_tag = "[dim]no key needed[/dim]"
+                    elif bool(_ac.get_api_key(b)):
+                        key_tag = "[green]key ✓[/green]"
+                    else:
+                        key_tag = "[yellow]no key[/yellow]"
+                    active = " [bold]← active[/bold]" if b == cur else ""
+                    p(f"  {b:<14}{key_tag}{active}")
+
+            elif be_sub == "set":
+                if len(be_parts) < 3:
+                    p("[red]Usage:[/red] ai backend set <ollama|claude-code|anthropic|openai|openrouter>")
+                    return
+                new_be = be_parts[2].lower()
+                if new_be not in _ac.VALID_BACKENDS:
+                    p(f"[red]Unknown backend:[/red] {new_be}")
+                    p(f"Valid: {', '.join(_ac.VALID_BACKENDS)}")
+                    return
+                _ac.set_active_backend(new_be)
+                _ac.clear_manual_cache()
+                _ac.clear_history()
+                p(f"[green]Backend set to:[/green] {new_be}")
+
+            elif be_sub == "current":
+                p(f"Active backend: {_ac.get_active_backend()}")
+                p(f"Active model:   {_ac._get_active_model()}")
+
+            else:
+                p("Usage:  ai backend list | set <name> | current")
+            return
+
+        # ── ai key … ──────────────────────────────────────────────────────
+        if sub.startswith("key"):
+            if not HAVE_ASSISTANT:
+                p("[yellow]AI assistant not configured.[/yellow]")
+                return
+            try:
+                import assistant_core as _ac
+            except Exception as e:
+                p(f"[red]Could not load assistant_core:[/red] {e}")
+                return
+
+            key_parts = user_query.split()
+            key_sub   = key_parts[1].lower() if len(key_parts) > 1 else ""
+
+            if key_sub == "set":
+                if len(key_parts) < 4:
+                    p("[red]Usage:[/red] ai key set <backend> <api-key>")
+                    p("  Backends: anthropic, openai, openrouter")
+                    return
+                backend_name = key_parts[2].lower()
+                api_key_val  = key_parts[3]
+                if backend_name not in ("anthropic", "openai", "openrouter"):
+                    p(f"[red]Unknown backend:[/red] {backend_name}")
+                    return
+                _ac.set_api_key(backend_name, api_key_val)
+                p(f"[green]API key saved for {backend_name}.[/green]")
+                p("[dim]Key stored in ~/.ai_helper/api_keys.json[/dim]")
+
+            elif key_sub == "clear":
+                if len(key_parts) < 3:
+                    p("[red]Usage:[/red] ai key clear <backend>")
+                    return
+                backend_name = key_parts[2].lower()
+                _ac.clear_api_key(backend_name)
+                p(f"[green]API key cleared for {backend_name}.[/green]")
+
+            elif key_sub == "detect":
+                # Read Codex CLI auth info from ~/.codex/
+                codex_info = _ac.get_codex_auth_info()
+                if not codex_info["found"]:
+                    p("[yellow]No Codex CLI config found.[/yellow]")
+                    p("[dim]Checked: ~/.codex/auth.json, ~/.codex/config.toml[/dim]")
+                    p("[dim]To set a key manually:  ai key set openai <key>[/dim]")
+                elif codex_info["auth_mode"] == "chatgpt":
+                    p(f"[cyan]Codex auth mode: chatgpt (subscription-based)[/cyan]")
+                    p("[dim]A session token is stored, not an OpenAI API key.[/dim]")
+                    p("[dim]Subscription tokens cannot be used with the OpenAI API directly.[/dim]")
+                    p("")
+                    p("Options:")
+                    p("  model set claude-code        Use Claude Code CLI (no API key required)")
+                    p("  ai key set openai <key>      Set an OpenAI API key manually")
+                    p("  [dim]Get a key at: platform.openai.com/api-keys[/dim]")
+                elif codex_info.get("api_key"):
+                    found_key = codex_info["api_key"]
+                    masked = found_key[:8] + "..." + found_key[-4:]
+                    p(f"[green]OpenAI API key found in Codex config:[/green] {masked}")
+                    p("Save as the openai backend key? (yes / no)")
+                    try:
+                        answer = input("  > ").strip().lower()
+                    except Exception:
+                        answer = ""
+                    if answer in ("yes", "y"):
+                        _ac.set_api_key("openai", found_key)
+                        p("[green]Key saved.[/green]")
+                        p("[dim]Use:  model set codex   or   model set gpt[/dim]")
+                    else:
+                        p("[yellow]Cancelled.[/yellow]")
+                else:
+                    p(f"[yellow]Codex config found (auth_mode: {codex_info['auth_mode']}) — no API key present.[/yellow]")
+                    p("[dim]To set a key manually:  ai key set openai <key>[/dim]")
+
+            else:
+                p("Usage:  ai key set <backend> <api-key>")
+                p("        ai key clear <backend>")
+                p("        ai key detect              (find key from Codex CLI config)")
+                p("  Backends: anthropic, openai, openrouter")
+            return
 
         # ai fix — diagnose the last failed or unrecognised command
         if sub == "fix":
@@ -4334,50 +4547,64 @@ Examples:
 """
 
     sec12 = """
-[bold]8. AI (Local assistant & models)[/bold]
------------------------------------
+[bold]8. AI (Assistant, models & backends)[/bold]
+-------------------------------------------
 
-CMC can run a local AI assistant (Ollama-based) and lets you control the model.
-The AI knows your current folder, recent log, macros and aliases — so answers are contextual.
-It also remembers your last few messages in the session (follow-up questions work).
+CMC supports multiple AI backends:
+  ollama      — local models via Ollama (default, no key needed)
+  claude-code — Claude Code CLI (no API key needed)
+  anthropic   — Claude API (requires key from console.anthropic.com)
+  openai      — ChatGPT / Codex API (requires key from platform.openai.com)
+  openrouter  — any model via openrouter.ai (requires key)
 
-• ai <question>
-  Ask the assistant. Answers are short by default — ask for detail if you need more.
-  Examples:
-    ai how do I zip this folder and push to git?
-    ai what macros do I have?
+The AI receives your macros, aliases, folder listing, recent commands
+and conversation history — identical across all backends.
 
-• ai fix
-  If a command just failed, 'ai fix' automatically passes the error to the AI
-  and asks what went wrong and how to fix it.
+AI manual tiers (auto-selected by backend):
+  Full manual  — anthropic, openai, claude-code
+  Medium       — openrouter, Ollama 14b+
+  Mini         — small Ollama models (≤8b)
 
-• ai clear
-  Wipe the conversation history and start fresh.
+• ai <question>      Ask anything. Context-aware.
+• ai fix             Auto-diagnose the last failed command.
+• ai clear           Reset conversation history.
 
-• model list
-  List installed local models (from `ollama list`).
+Model & backend control
+-----------------------
+• model set <name>           Switch model. Accepts aliases or full IDs.
+  No-key aliases (use what you already have installed):
+    model set claude-code               Uses your Claude Code CLI
+  Cloud aliases (will ask for API key if not saved):
+    model set claude                    Claude Sonnet (Anthropic API)
+    model set claude-opus               Claude Opus
+    model set claude-haiku              Claude Haiku
+    model set codex                     GPT-5.3-codex (OpenAI)
+    model set gpt                       GPT-5.2 (OpenAI)
+  Full model IDs also work:
+    model set qwen2.5:14b-instruct
+    model set meta-llama/llama-3.1-8b   (auto-routes to openrouter)
 
-• model current
-  Show the model CMC is currently configured to use.
+• model current              Show active model and backend.
+• model list                 List installed Ollama models.
 
-• model set <model>
-  Switch the active model used by CMC. Also clears conversation history.
-  Examples:
-    ai-model set llama3.1:8b
-    ai-model set qwen2.5:14b-instruct
+Backend management
+------------------
+• ai backend list                        Show all backends + key status + active.
+• ai backend set <name>                  Switch backend directly.
+• ai backend current                     Show current backend and model.
 
+API key management
+------------------
+• ai key set <backend> <key>             Save an API key.
+• ai key clear <backend>                 Remove a stored key.
+• ai key detect                          Auto-find OpenAI key from Codex CLI config.
+  Backends: anthropic, openai, openrouter
+  Keys stored in: ~/.ai_helper/api_keys.json
+  Env vars also work: ANTHROPIC_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY
 
-Notes:
-• If Ollama is not installed or running, model listing may fail.
-• To install models: open CMC_AI_Ollama_Setup.cmd from your CMC folder.
-• Model names must match `ollama list`.
-• `status` shows the current AI model.
-
-
-Examples:
-  ai how do I zip this folder and push it to git in one step?
-  ai-model set qwen2.5:14b-instruct
-  model set llama3.1:8b
+Quick start (no API key):
+  model set claude-code
+  ai how do I zip this folder and push it to git?
 """
 
 
@@ -4707,6 +4934,8 @@ def complete_command(text, state):
     # Control
     "help", "exit",
     "ai-model list", "ai-model current", "ai-model set", "model list", "model current", "model set",
+    "ai backend list", "ai backend set", "ai backend current",
+    "ai key set", "ai key clear", "ai key detect",
 ]
 
     cmds += list(MACROS.keys())  # include macro names
@@ -4850,6 +5079,8 @@ def build_completer():
         "ai", "ai fix", "ai clear",
         "ai-model list", "ai-model current", "ai-model set",
         "model list", "model current", "model set",
+        "ai backend list", "ai backend set", "ai backend current",
+        "ai key set", "ai key clear", "ai key detect",
         # Config
         "config list", "config get", "config set", "config reset",
         # Scaffolding & dev tools
