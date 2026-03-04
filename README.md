@@ -8,7 +8,7 @@
 
 [![Python](https://img.shields.io/badge/Python-3.10+-3776ab?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078d4?style=flat-square&logo=windows)](https://microsoft.com/windows)
-[![AI](https://img.shields.io/badge/AI-Ollama%20powered-7c3aed?style=flat-square)](https://ollama.com)
+[![AI](https://img.shields.io/badge/AI-Multi%20backend-7c3aed?style=flat-square)](https://github.com/Wiglol/Computer_Main_Centre)
 [![License](https://img.shields.io/badge/License-MIT-22c55e?style=flat-square)](LICENSE.txt)
 
 </div>
@@ -29,7 +29,7 @@ No need to remember different CLI tools. One console, one language.
 |:--:|---|---|
 | 🚀 | **Git publishing** — create repos, commit, push in one step | `git upload`, `git update "my message"` |
 | 🔄 | **Macros & chains** — save and run multi-step automation | `macro add deploy = backup ..., git update` |
-| 🤖 | **Local AI assistant** — runs fully offline via Ollama | `ai how do I zip a folder and push it?` |
+| 🤖 | **AI assistant** — Ollama, Claude Code, OpenAI, Anthropic, OpenRouter | `ai how do I zip a folder and push it?` |
 | 📁 | **File operations** — copy, move, zip, backup, search | `backup 'C:/Project' 'C:/Backups'` |
 | 🛡️ | **Dry-run + Undo** — preview or reverse almost any action | `dry-run on`, `undo` |
 | 🔍 | **Fast global search** — index drives, search instantly | `/build C D`, `/find ProjectName` |
@@ -51,7 +51,8 @@ git clone https://github.com/Wiglol/Computer_Main_Centre
 Or download the ZIP from the GitHub page and extract anywhere.
 
 **3. (Optional) Set up the AI assistant**
-Install [Ollama](https://ollama.com/download), then run `CMC_AI_Ollama_Setup.cmd` from the CMC folder.
+Run `CMC_AI_Setup.cmd` from the CMC folder.
+If you want local/offline AI, install [Ollama](https://ollama.com/download) first.
 
 **4. Launch CMC**
 Double-click `Start_CMC.vbs`
@@ -126,21 +127,30 @@ alias add proj = cd 'C:/MyProject'
 
 ## AI Assistant
 
-Runs locally via Ollama — no internet required after setup. The AI sees your current folder listing, recent command log, active macros, and aliases, so answers are specific to your session.
+Supports local and cloud backends:
+- Ollama (local/offline after model download)
+- Claude Code CLI
+- OpenAI API
+- Anthropic API
+- OpenRouter API
+
+The AI sees your current folder listing, recent command log, active macros, and aliases, so answers are specific to your session.
 
 ```
-ai <question>                    Ask anything — context-aware
-ai fix                           Auto-explain the last failed command
-ai clear                         Reset conversation history
-ai-model set qwen2.5:14b-instruct   Switch to the heavy model (better reasoning)
-ai-model set llama3.1:8b            Switch back to the light model
+ai <question>                 Ask anything — context-aware
+ai fix                        Auto-explain the last failed command
+ai clear                      Reset conversation history
+
+ai-model pick                 Interactive model/backend picker
+ai-model list                 Show available backends/models + status
+ai-model current              Show active model (and effort when applicable)
+
+ai key set <backend> <key>    Save API key (openai/anthropic/openrouter)
+ai key clear <backend>        Remove saved API key
+ai key detect                 Show which keys are currently set
 ```
 
-**Models:**
-| Model | Size | Best for |
-|---|---|---|
-| `llama3.1:8b` | ~5 GB | Fast everyday questions (default) |
-| `qwen2.5:14b-instruct` | ~9 GB | Complex reasoning, longer explanations |
+Claude Code and OpenAI support effort selection (`default`, `low`, `medium`, `high`) from `ai-model pick`.
 
 ---
 
@@ -225,7 +235,9 @@ Type `help 14` inside CMC for the full Docker reference.
 - Windows 10 / 11
 - Python 3.10+
 - [Git for Windows](https://git-scm.com/) — for Git features
-- [Ollama](https://ollama.com/download) — for the AI assistant (optional)
+- [Ollama](https://ollama.com/download) — optional local/offline AI backend
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) — optional backend (no API key required)
+- Optional API keys for OpenAI / Anthropic / OpenRouter if using those backends
 
 ---
 
@@ -235,7 +247,7 @@ Full command references are in the `manuals/` folder:
 
 - `CMC_AI_Manual_MINI.md` — compact reference for the light AI model (8b)
 - `CMC_AI_Manual_MEDIUM.md` — full reference for the heavy AI model (14b)
-- `AI_Manual.txt` — comprehensive technical reference for external AI use
+- `AI_Manual.md` — comprehensive technical reference for external AI use
 
 ---
 
