@@ -376,7 +376,8 @@ _ENV_KEY_MAP: Dict[str, str] = {
 
 def _load_keys() -> Dict[str, str]:
     try:
-        return json.loads(_KEYS_PATH.read_text(encoding="utf-8"))
+        # Accept UTF-8 with/without BOM for compatibility with legacy setup writers.
+        return json.loads(_KEYS_PATH.read_text(encoding="utf-8-sig"))
     except Exception:
         return {}
 
@@ -415,6 +416,13 @@ def clear_api_key(backend: str) -> None:
 # ---------------------------------------------------------------------------
 
 VALID_BACKENDS = ("ollama", "anthropic", "openai", "openrouter", "claude-code")
+
+# Claude Code CLI — known models with descriptions for the picker
+CLAUDE_CODE_MODELS: List[tuple] = [
+    ("claude-haiku-4-5",  "Haiku  — fastest & cheapest"),
+    ("claude-sonnet-4-6", "Sonnet — balanced performance"),
+    ("claude-opus-4-6",   "Opus   — most capable"),
+]
 
 # Friendly aliases → full model IDs
 _MODEL_ALIASES: Dict[str, str] = {
@@ -472,6 +480,68 @@ def set_active_backend(backend: str) -> None:
         import CMC_Config
         cfg = CMC_Config.load_config()
         cfg = CMC_Config.set_config_value(cfg, "ai.backend", backend)
+        CMC_Config.save_config(cfg)
+    except Exception:
+        pass
+
+
+def get_claude_code_model() -> str:
+    """Return the specific Claude model to pass to claude CLI, or '' to use the CLI default."""
+    try:
+        import CMC_Config
+        cfg = CMC_Config.load_config()
+        return cfg.get("ai", {}).get("claude_code_model", "") or ""
+    except Exception:
+        return ""
+
+
+def set_claude_code_model(model: str) -> None:
+    """Persist which specific Claude model the claude-code backend should use."""
+    try:
+        import CMC_Config
+        cfg = CMC_Config.load_config()
+        cfg = CMC_Config.set_config_value(cfg, "ai.claude_code_model", model)
+        CMC_Config.save_config(cfg)
+    except Exception:
+        pass
+
+
+def get_backend_effort(backend: str) -> str:
+    """
+    Return the configured effort for a backend, or '' for provider default.
+    Supported backends: claude-code, openai.
+    """
+    key_map = {
+        "claude-code": "ai.claude_code_effort",
+        "openai": "ai.openai_effort",
+    }
+    key = key_map.get((backend or "").lower())
+    if not key:
+        return ""
+    try:
+        import CMC_Config
+        cfg = CMC_Config.load_config()
+        return str(CMC_Config.get_config_value(cfg, key, "") or "").strip().lower()
+    except Exception:
+        return ""
+
+
+def set_backend_effort(backend: str, effort: str) -> None:
+    """Persist effort for a backend ('', low, medium, high)."""
+    key_map = {
+        "claude-code": "ai.claude_code_effort",
+        "openai": "ai.openai_effort",
+    }
+    key = key_map.get((backend or "").lower())
+    if not key:
+        return
+    eff = (effort or "").strip().lower()
+    if eff and eff not in ("low", "medium", "high"):
+        return
+    try:
+        import CMC_Config
+        cfg = CMC_Config.load_config()
+        cfg = CMC_Config.set_config_value(cfg, key, eff)
         CMC_Config.save_config(cfg)
     except Exception:
         pass
@@ -595,13 +665,22 @@ def _call_openai(messages: List[Dict[str, str]]) -> str:
         "Authorization": f"Bearer {key}",
         "content-type": "application/json",
     }
+    model_lc = model.lower()
+    # Keep this conservative: only send effort for model families that support reasoning controls.
+    supports_effort = ("codex" in model_lc) or model_lc.startswith(("gpt-5", "o1-", "o3-", "o4-"))
+    effort = get_backend_effort("openai") if supports_effort else ""
+    if effort not in ("low", "medium", "high"):
+        effort = ""
+
     # Codex models use the Responses API
-    if "codex" in model.lower():
+    if "codex" in model_lc:
         payload: Dict[str, Any] = {
             "model": model,
             "input": messages,
             "max_output_tokens": 4096,
         }
+        if effort:
+            payload["reasoning"] = {"effort": effort}
         data = _http_post("https://api.openai.com/v1/responses", headers, payload)
         try:
             return data["output"][0]["content"][0]["text"].strip()
@@ -613,6 +692,8 @@ def _call_openai(messages: List[Dict[str, str]]) -> str:
             "messages": messages,
             "max_tokens": 4096,
         }
+        if effort:
+            payload["reasoning_effort"] = effort
         data = _http_post("https://api.openai.com/v1/chat/completions", headers, payload)
         try:
             return data["choices"][0]["message"]["content"].strip()
@@ -699,12 +780,47 @@ def _call_claude_code(messages: List[Dict[str, str]]) -> str:
     """
     Call Claude Code CLI as a subprocess using `claude -p`.
     Uses the user's existing Claude Code authentication — no API key needed.
-    The full CMC system prompt is passed via --system-prompt-file.
+    Passes the CMC system prompt using the best supported CLI flag.
     Conversation history is embedded in the user query text.
+
+    Windows note: npm-installed tools like claude land as claude.cmd, which
+    cannot be launched directly by subprocess — must go through cmd.exe /c.
     """
     import shutil
     import subprocess
+    import sys as _sys
     import tempfile
+
+    def _claude_help_text(claude_command: str) -> str:
+        """Best-effort `claude --help` output; empty on failure."""
+        try:
+            if _sys.platform == "win32" and claude_command.lower().endswith((".cmd", ".bat")):
+                help_args = ["cmd.exe", "/c", claude_command, "--help"]
+            else:
+                help_args = [claude_command, "--help"]
+            help_result = subprocess.run(
+                help_args,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            return (help_result.stdout or help_result.stderr or "").lower()
+        except Exception:
+            return ""
+
+    def _truncate_prompt_for_cli(system_text: str, max_chars: int = 12000) -> str:
+        """
+        Keep prompt size under command-line limits when passing as an argument.
+        """
+        if len(system_text) <= max_chars:
+            return system_text
+        tail_budget = 1800
+        head_budget = max(1000, max_chars - tail_budget - 64)
+        return (
+            system_text[:head_budget]
+            + "\n\n[... CMC manual truncated for CLI length ...]\n\n"
+            + system_text[-tail_budget:]
+        )
 
     # Find the claude executable (may be claude.cmd on Windows)
     claude_cmd = (
@@ -742,23 +858,47 @@ def _call_claude_code(messages: List[Dict[str, str]]) -> str:
     else:
         user_query = conversation[-1]["content"] if conversation else ""
 
-    # Write system prompt to a temp file (avoids command-line length limits)
     system_text = "\n".join(system_parts)
     tmp_path: Optional[str] = None
+    result = None
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".txt", delete=False, encoding="utf-8"
-        ) as tmp:
-            tmp.write(system_text)
-            tmp_path = tmp.name
+        help_text = _claude_help_text(claude_cmd)
+
+        # Build base arguments.
+        claude_args = ["-p", user_query, "--output-format", "text"]
+
+        # Choose the best supported system-prompt method.
+        # Priority: file (best for long prompts) -> append/system prompt arg.
+        if "--system-prompt-file" in help_text:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".txt", delete=False, encoding="utf-8"
+            ) as tmp:
+                tmp.write(system_text)
+                tmp_path = tmp.name
+            claude_args += ["--system-prompt-file", tmp_path]
+        elif "--append-system-prompt" in help_text:
+            claude_args += ["--append-system-prompt", _truncate_prompt_for_cli(system_text)]
+        elif "--system-prompt" in help_text:
+            claude_args += ["--system-prompt", _truncate_prompt_for_cli(system_text)]
+
+        # Add specific model if configured (e.g. claude-haiku-4-5)
+        cc_model = get_claude_code_model()
+        if cc_model:
+            claude_args += ["--model", cc_model]
+        # Only pass effort if this CLI supports the flag.
+        cc_effort = get_backend_effort("claude-code")
+        if cc_effort in ("low", "medium", "high") and "--effort" in help_text:
+            claude_args += ["--effort", cc_effort]
+
+        # On Windows, .cmd and .bat files must be executed via cmd.exe /c
+        # (subprocess cannot launch script files directly without shell=True)
+        if _sys.platform == "win32" and claude_cmd.lower().endswith((".cmd", ".bat")):
+            run_args = ["cmd.exe", "/c", claude_cmd] + claude_args
+        else:
+            run_args = [claude_cmd] + claude_args
 
         result = subprocess.run(
-            [
-                claude_cmd,
-                "-p", user_query,
-                "--system-prompt-file", tmp_path,
-                "--output-format", "text",
-            ],
+            run_args,
             capture_output=True,
             text=True,
             timeout=120,
@@ -770,11 +910,21 @@ def _call_claude_code(messages: List[Dict[str, str]]) -> str:
             except Exception:
                 pass
 
+    if result is None:
+        raise RuntimeError("claude CLI could not be launched.")
+
     if result.returncode != 0:
-        err = (result.stderr or result.stdout or "").strip()[:500]
+        err = (result.stderr or result.stdout or "").strip()[:600]
+        # Clear guidance when CLI flag support changed.
+        if "system-prompt-file" in err.lower() or "unknown option" in err.lower() or "unrecognized" in err.lower():
+            raise RuntimeError(
+                "Your Claude Code CLI rejected an older system-prompt flag.\n"
+                "CMC now supports modern flags; if this persists, run: npm update -g @anthropic-ai/claude-code\n"
+                f"Details: {err}"
+            )
         raise RuntimeError(
             f"claude CLI exited with code {result.returncode}.\n"
-            f"Make sure you are logged in (`claude` works in your terminal).\n"
+            f"Make sure you are logged in (run `claude` in your terminal to verify).\n"
             f"Details: {err}"
         )
 

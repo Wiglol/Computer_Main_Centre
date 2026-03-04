@@ -520,51 +520,92 @@ Behavior details:
 ============================================================
 
 20.1 Assistant commands
-- ai <question>
-- ai fix
-- ai clear
+- ai <question>            ask the assistant (context-aware, rolling history)
+- ai fix                   diagnose the last failed/unknown command
+- ai clear                 reset conversation history
 
-20.2 Model manager commands
-- ai-model list
-- ai-model current
-- ai-model set <model>
-- model list
-- model current
-- model set <model>
+20.2 Model / backend control
+- model set <name>         switch model; resolves aliases; auto-detects backend; prompts for key if needed
+- model current            show active model and backend
+- model list               list installed Ollama models
+- ai-model list / ai-model current / ai-model set <model>  (identical aliases)
+
+Model aliases:
+  claude-code   → claude-code      backend: claude-code  (no key needed)
+  claude        → claude-sonnet-4-6 backend: anthropic
+  claude-sonnet → claude-sonnet-4-6 backend: anthropic
+  claude-opus   → claude-opus-4-6   backend: anthropic
+  claude-haiku  → claude-haiku-4-5  backend: anthropic
+  gpt / chatgpt → gpt-5.2           backend: openai
+  gpt-5         → gpt-5.2           backend: openai
+  codex         → gpt-5.3-codex     backend: openai
+  (contains '/') → unchanged        backend: openrouter
+  (anything else) → unchanged       backend: ollama
 
 ai-model list behavior:
 - Tries Ollama from PATH first.
-- Falls back to common Windows install paths:
-  - %LOCALAPPDATA%/Programs/Ollama/ollama.exe
-  - %ProgramFiles%/Ollama/ollama.exe
-  - %ProgramFiles(x86)%/Ollama/ollama.exe
+- Falls back to common Windows install paths.
+- Only lists Ollama models; cloud models are listed via: ai backend list
 
-20.3 ai fix behavior
+20.3 Supported backends
+  ollama      Local Ollama server (localhost:11434). No key needed.
+  claude-code Claude Code CLI subprocess (`claude -p`). No key needed. Uses existing auth.
+  anthropic   Anthropic API. Key stored in ~/.ai_helper/api_keys.json or ANTHROPIC_API_KEY env.
+  openai      OpenAI API (Chat Completions for GPT; Responses API for Codex). Key: OPENAI_API_KEY.
+  openrouter  OpenRouter (openai-compatible). Key: OPENROUTER_API_KEY.
+
+Backend management commands:
+- ai backend list          show all backends, key status, active one
+- ai backend set <name>    switch backend (persists to CMC_Config.json at ai.backend)
+- ai backend current       show current backend and model
+
+API key management commands:
+- ai key set <backend> <key>   save to ~/.ai_helper/api_keys.json
+- ai key clear <backend>       remove stored key
+- ai key detect                read Codex CLI auth.json; extract API key if present
+
+Key resolution order (per backend):
+1. Environment variable (ANTHROPIC_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY)
+2. ~/.ai_helper/api_keys.json
+3. Not found → error with instructions
+
+20.4 claude-code backend details
+- Calls `claude -p <query> --system-prompt-file <tmpfile> --output-format text`
+- System prompt written to a NamedTemporaryFile (deleted after call)
+- Conversation history embedded in the user query as [PRIOR CONVERSATION] block
+- Requires Claude Code CLI in PATH (`claude` or `claude.cmd`)
+- No API key — uses existing Claude Code authentication
+
+20.5 OpenAI backend routing
+- Models containing "codex" → Responses API (POST /v1/responses, field: input, response: output[0].content[0].text)
+- All other OpenAI models → Chat Completions (POST /v1/chat/completions)
+
+20.6 ai fix behavior
 - Uses _LAST_CMD and _LAST_ERROR globals, set whenever a command fails OR is unrecognised.
-- Works on both Python exceptions (error = exception message) AND unknown/typo commands (error = "Unknown command").
-- When error is "Unknown command", asks AI what the user likely meant and what the correct syntax is.
-- A one-time tip ("Tip: type 'ai fix'") is shown on the first unknown command; suppressed forever after via sentinel file ~/.ai_helper/.cmc_ai_fix_tip_shown.
+- Works on both Python exceptions AND unknown/typo commands (error = "Unknown command").
+- When error is "Unknown command", asks AI what the user likely meant.
+- One-time tip shown on first unknown command; suppressed after via sentinel file.
 
-20.4 Context passed to AI
-- Current CWD listing (top-level truncated)
-- Flags (batch/dry_run/ssl)
+20.7 Context passed to AI
+- Current CWD listing (top-level, max 30 entries)
+- Flags: batch, dry_run, ssl_verify
 - Java version
 - Full macros (name + body)
 - Full aliases (name + command)
-- Recent log entries
-- recent_commands: rolling list of last 20 raw commands typed this session (includes typos/unknowns)
-- last_issue: {command: str, error: str} for the most recently failed or unrecognised command
+- Recent log entries (last 6)
+- recent_commands: rolling list of last 20 raw inputs this session
+- last_issue: {command, error} for most recently failed command
 
-20.5 Manual selection behavior in assistant_core
-- If model name contains 14b/32b/70b/72b -> loads manuals/CMC_AI_Manual_MEDIUM.md
-- Else -> loads manuals/CMC_AI_Manual_MINI.md
+20.8 Manual tier selection (auto, in assistant_core._active_manual_path)
+- backend in (anthropic, openai, claude-code) → manuals/AI_Manual.md  (this file)
+- backend == openrouter, OR Ollama model contains 14b/32b/70b/72b → CMC_AI_Manual_MEDIUM.md
+- Small Ollama model → CMC_AI_Manual_MINI.md
+- Fallback if file missing → next tier down (never crashes)
 
-20.6 Model persistence (current behavior)
-- ai-model set persists to src/CMC_Config.json at key ai.model.
-- Save flow performs write+reload verification before reporting success.
-- Model can also be changed via:
-  - config set ai_model <model>
-  - config set ai.model <model>
+20.9 Model persistence
+- model set persists to src/CMC_Config.json at keys ai.model and ai.backend.
+- Save flow: load → set_config_value → save → reload verify before reporting success.
+- Backend default: "ollama" (in DEFAULT_CONFIG).
 
 ============================================================
 21) GIT COMMANDS (CMC_Git.py)

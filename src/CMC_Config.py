@@ -29,8 +29,11 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "dry_run": False,
     "ssl_verify": True,
     "ai": {
-        "model":   "llama3.1:8b",
-        "backend": "ollama",
+        "model":            "llama3.1:8b",
+        "backend":          "ollama",
+        "claude_code_model": "",        # specific model passed to claude CLI, e.g. claude-haiku-4-5
+        "claude_code_effort": "",       # low|medium|high for claude CLI --effort ('' = CLI default)
+        "openai_effort": "",            # low|medium|high for OpenAI reasoning models ('' = API default)
     },
     "space": {
         "default_depth": 2,
@@ -87,7 +90,8 @@ def load_config(base_dir: Path | None = None) -> Dict[str, Any]:
     cfg: Dict[str, Any] = {}
     if cfg_path.exists():
         try:
-            text = cfg_path.read_text(encoding="utf-8")
+            # Accept UTF-8 files with or without BOM (legacy setup scripts used BOM).
+            text = cfg_path.read_text(encoding="utf-8-sig")
             data = json.loads(text)
             if isinstance(data, dict):
                 cfg = data

@@ -429,33 +429,59 @@ config set space.default_depth 4
 ---
 
 # ===========================
-# 12. AI MODEL SWITCHING
+# 12. AI ASSISTANT & BACKENDS
 # ===========================
 
-- `ai <question>` — ask the assistant (answers short by default)
+## Assistant commands
+- `ai <question>` — ask the assistant (context-aware)
 - `ai fix` — diagnose the last failed command
 - `ai clear` — reset conversation history
-- `ai-model list` — list installed Ollama models
-- `ai-model current` — show active model
-- `ai-model set <model>` — switch active model
 
-Aliases: `model list` | `model current` | `model set <model>`
+## Model & backend control
+- `model set <name>` — switch model; accepts aliases or full IDs
+- `model current` — show active model and backend
+- `model list` — list installed Ollama models
+- Aliases: `ai-model list` | `ai-model current` | `ai-model set <model>`
+
+## Supported backends
+| Backend | Key needed | Notes |
+|---|---|---|
+| `ollama` | No | Local models via Ollama (default) |
+| `claude-code` | No | Uses local Claude Code CLI |
+| `anthropic` | Yes | Claude API (console.anthropic.com) |
+| `openai` | Yes | ChatGPT / Codex API (platform.openai.com) |
+| `openrouter` | Yes | Any model via openrouter.ai |
+
+## Model aliases
+| Alias | Resolves to | Backend |
+|---|---|---|
+| `claude-code` | claude-code | claude-code |
+| `claude` | claude-sonnet-4-6 | anthropic |
+| `claude-opus` | claude-opus-4-6 | anthropic |
+| `claude-haiku` | claude-haiku-4-5 | anthropic |
+| `gpt` / `chatgpt` | gpt-5.2 | openai |
+| `codex` | gpt-5.3-codex | openai |
+| `meta-llama/llama-3.1-8b` | (unchanged) | openrouter |
+
+## Backend management
+- `ai backend list` — show all backends, key status, active one
+- `ai backend set <name>` — switch backend
+- `ai backend current` — show current backend and model
+
+## API key management
+- `ai key set <backend> <key>` — save key to ~/.ai_helper/api_keys.json
+- `ai key clear <backend>` — remove stored key
+- `ai key detect` — find OpenAI key from Codex CLI config
+- Env vars override stored keys: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`
+
+## Manual tier selection (auto)
+- `anthropic` / `openai` / `claude-code` → AI_Manual.md (full)
+- `openrouter` / Ollama 14b+ → CMC_AI_Manual_MEDIUM.md (this file)
+- Small Ollama models → CMC_AI_Manual_MINI.md
 
 **Context the AI can see:**
 The AI receives the full content of macros (name + body) and aliases (name + command),
 the current folder listing, recent log entries, Java version, and active flags.
-This means you can ask things like "what does my deploy macro do?" or
-"make a macro using my existing aliases" and get accurate answers.
-
-## Available CMC models
-| Model | Tag | Use |
-|---|---|---|
-| Light | `llama3.1:8b` | Fast, everyday tasks, default |
-| Heavy | `qwen2.5:14b-instruct` | More capable, complex reasoning |
-
-The active model controls which manual is loaded:
-- `llama3.1:8b` → loads CMC_AI_Manual_MINI.md
-- `qwen2.5:14b-instruct` → loads CMC_AI_Manual_MEDIUM.md (this file)
 
 To install models: run `CMC_AI_Ollama_Setup.cmd` from your CMC folder.
 

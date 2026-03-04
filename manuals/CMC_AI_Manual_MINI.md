@@ -241,18 +241,34 @@ downloadlist '<urls.txt>' to '<destination-folder>'
 ═══════════════════════════════════════
 AI
 ═══════════════════════════════════════
-ai <question>
+ai <question>              ask the assistant
 ai fix                     diagnose the last failed command
 ai clear                   reset conversation history
-ai-model list              list installed Ollama models
-ai-model current           show active model
-ai-model set <model>       switch model
 
-Available models:
-  llama3.1:8b              light / fast (default)
-  qwen2.5:14b-instruct     heavier / more capable
+Model / backend control:
+model set <name>           switch model; accepts aliases or full IDs
+model current              show active model and backend
+model list                 list installed Ollama models
 
 Aliases: model list | model current | model set <model>
+         ai-model list | ai-model current | ai-model set <model>
+
+Model aliases (no API key needed):
+  model set claude-code    use Claude Code CLI
+
+Ollama model examples:
+  model set llama3.1:8b
+  model set qwen2.5:14b-instruct
+
+Backend commands:
+ai backend list            show backends, key status, active
+ai backend set <name>      switch backend (ollama/claude-code/anthropic/openai/openrouter)
+ai backend current         show current backend and model
+
+API key commands:
+ai key set <backend> <key> save an API key
+ai key clear <backend>     remove a stored key
+ai key detect              try to find an OpenAI key from Codex CLI config
 
 CONTEXT AVAILABLE TO AI:
 The AI can see: current folder listing, macro names+bodies, alias names+commands,
@@ -283,8 +299,8 @@ DOCKER COMMANDS
 Docker commands are not available in this model.
 When the user asks about docker, reply with exactly this:
 
-  "Docker commands require the heavy AI model.
-   Switch with: ai-model set qwen2.5:14b-instruct
+  "Docker commands require a more capable AI model.
+   Switch with: model set qwen2.5:14b-instruct  (or: model set claude-code)
    Or type: help 14  to see the full docker help."
 
 Do NOT attempt to generate docker commands yourself.

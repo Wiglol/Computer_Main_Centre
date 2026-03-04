@@ -212,6 +212,10 @@ _LAST_ERROR: str = ""
 _CMD_LOG: list = []
 _CMD_LOG_MAX = 20
 
+# Macro continuation state — allows multi-line / pasted macro definitions
+_MACRO_CONT_NAME: str = ""   # name of macro being built across lines
+_MACRO_CONT_PARTS: list = [] # command chunks collected so far
+
 
 # ==========================================================
 # 🔧  Computer Main Centre – Auto-Setup & Dependency Checker
@@ -482,11 +486,40 @@ def show_header():
     """
     ai_model = get_ai_model()
     if not HAVE_ASSISTANT:
-        ai_status = "[red]Not configured[/red]"
-    elif _check_ollama_alive():
-        ai_status = "[green]Ready[/green]"
+        ai_display = ai_model
+        ai_status  = "[red]Not configured[/red]"
     else:
-        ai_status = "[yellow]Ollama offline[/yellow]"
+        try:
+            import assistant_core as _hdr_ac
+            _backend = _hdr_ac.get_active_backend()
+        except Exception:
+            _backend = "ollama"
+
+        if _backend == "ollama":
+            ai_display = ai_model
+            ai_status  = "[green]Ready[/green]" if _check_ollama_alive() else "[yellow]Ollama offline[/yellow]"
+        elif _backend == "claude-code":
+            import shutil as _hdr_sh
+            _cc_found = bool(_hdr_sh.which("claude") or _hdr_sh.which("claude.cmd"))
+            try:
+                _cc_model = _hdr_ac.get_claude_code_model()
+            except Exception:
+                _cc_model = ""
+            if _cc_model:
+                # Show e.g. "haiku-4-5 [claude-code]"
+                _cc_short = _cc_model.replace("claude-", "")
+                ai_display = f"{_cc_short} [claude-code]"
+            else:
+                ai_display = "claude-code"
+            ai_status = "[green]Ready[/green]" if _cc_found else "[yellow]claude not found[/yellow]"
+        else:
+            # anthropic / openai / openrouter — check if a key is configured
+            ai_display = f"{ai_model} [{_backend}]"
+            try:
+                _has_key = bool(_hdr_ac.get_api_key(_backend))
+            except Exception:
+                _has_key = False
+            ai_status = "[green]Ready[/green]" if _has_key else "[yellow]No API key[/yellow]"
 
     batch_val = "[yellow]ON[/yellow]" if STATE["batch"] else "[dim]off[/dim]"
     dry_val   = "[yellow]ON[/yellow]" if STATE["dry_run"] else "[dim]off[/dim]"
@@ -508,7 +541,7 @@ def show_header():
     sep = "[dim] │ [/dim]"
     header_lines = [
         "[bold cyan]Computer Main Centre[/bold cyan]  [dim]— local command console[/dim]",
-        f"[cyan]Batch:[/cyan] {batch_val}{sep}[cyan]Dry-Run:[/cyan] {dry_val}{sep}[cyan]AI:[/cyan] {ai_model} ({ai_status})",
+        f"[cyan]Batch:[/cyan] {batch_val}{sep}[cyan]Dry-Run:[/cyan] {dry_val}{sep}[cyan]AI:[/cyan] {ai_display} ({ai_status})",
     ]
     if show_update:
         header_lines.append(update_line)
@@ -519,7 +552,7 @@ def show_header():
         console.print(Panel.fit(content, border_style="cyan", padding=(0, 2)))
     else:
         print("Computer Main Centre — local command console")
-        print(f"Batch: {'ON' if STATE['batch'] else 'off'}  Dry-Run: {'ON' if STATE['dry_run'] else 'off'}  AI: {ai_model}")
+        print(f"Batch: {'ON' if STATE['batch'] else 'off'}  Dry-Run: {'ON' if STATE['dry_run'] else 'off'}  AI: {ai_display}")
         print(f"CMC: {upd}")
 
 _FIRST_RUN_SENTINEL    = DATA_DIR / ".cmc_first_run_done"
@@ -635,7 +668,7 @@ def status_panel():
     ssl_val   = "[green]ON[/green]"    if STATE["ssl_verify"]  else "[red]OFF[/red]"
 
     # ── AI ─────────────────────────────────────────────────────────────────
-    ai_model  = get_ai_model()
+    ai_model  = _current_ai_model_with_effort_label()
     ai_status = "[green]Ready[/green]" if HAVE_ASSISTANT else "[red]Not configured[/red]"
 
     # ── Java ───────────────────────────────────────────────────────────────
@@ -691,7 +724,7 @@ def show_status_box():
         ssl   = "ON" if STATE["ssl_verify"] else "off"
         java_version = STATE.get("java_version") or "checking..."
         print(f"Batch: {batch}  Dry-Run: {dry}  SSL: {ssl}")
-        print(f"AI: {get_ai_model()}  Java: {java_version}")
+        print(f"AI: {_current_ai_model_with_effort_label()}  Java: {java_version}")
         upd = STATE.get("cmc_update_status", "unknown")
         print(f"CMC: {upd}  Macros: {len(MACROS)}  Aliases: {len(ALIASES)}")
 
@@ -2616,6 +2649,527 @@ def _get_listening_ports() -> list:
     return sorted(rows, key=lambda r: r["port"])
 
 
+def _human_model_name(model_id: str) -> str:
+    """Compact human-readable label for known model IDs."""
+    m = (model_id or "").strip()
+    lower = m.lower()
+    known = {
+        "claude-haiku-4-5": "haiku 4.5",
+        "claude-sonnet-4-6": "sonnet 4.6",
+        "claude-opus-4-6": "opus 4.6",
+        "gpt-5.2": "gpt-5.2",
+        "gpt-5.3-codex": "codex 5.3",
+    }
+    return known.get(lower, m)
+
+
+def _get_ollama_model_names() -> list:
+    """Best-effort list of installed Ollama model names."""
+    try:
+        ollama_cmd = shutil.which("ollama") or shutil.which("ollama.exe")
+        if not ollama_cmd:
+            candidates = [
+                Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe",
+                Path(os.environ.get("ProgramFiles", "")) / "Ollama" / "ollama.exe",
+                Path(os.environ.get("ProgramFiles(x86)", "")) / "Ollama" / "ollama.exe",
+            ]
+            for cand in candidates:
+                if str(cand).strip() and cand.exists():
+                    ollama_cmd = str(cand)
+                    break
+        if not ollama_cmd:
+            return []
+        out = subprocess.check_output([ollama_cmd, "list"], stderr=subprocess.STDOUT, text=True)
+        names = []
+        for line in out.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            head = line.split()[0]
+            if head.upper() == "NAME":
+                continue
+            names.append(head)
+        return names
+    except Exception:
+        return []
+
+
+def _current_ai_model_label() -> str:
+    """Return the current selection as a single concise label."""
+    try:
+        import assistant_core as _ac
+        backend = _ac.get_active_backend()
+        base_model = _ac._get_active_model()
+        cc_model = _ac.get_claude_code_model()
+    except Exception:
+        return get_ai_model()
+
+    if backend == "claude-code":
+        return _human_model_name(cc_model) if cc_model else "claude default"
+    return _human_model_name(base_model)
+
+
+def _current_ai_model_with_effort_label() -> str:
+    """Single-line current model label, including effort where applicable."""
+    model_label = _current_ai_model_label()
+    try:
+        import assistant_core as _ac
+        backend = _ac.get_active_backend()
+        if backend in ("claude-code", "openai"):
+            eff = (_ac.get_backend_effort(backend) or "").strip().lower()
+            return f"{model_label} (effort: {eff or 'default'})"
+    except Exception:
+        pass
+    return model_label
+
+
+def _pick_effort_for_backend(p, backend: str, has_msvcrt: bool, rescape) -> str | None:
+    """
+    Interactive effort selector.
+    Returns: '' (default), 'low'|'medium'|'high', or None if cancelled.
+    """
+    if backend not in ("claude-code", "openai"):
+        return ""
+    if backend == "claude-code":
+        # Only show effort when the installed Claude CLI supports it.
+        try:
+            cc = shutil.which("claude") or shutil.which("claude.cmd") or shutil.which("claude.exe")
+            if not cc:
+                return ""
+            if cc.lower().endswith((".cmd", ".bat")):
+                args = ["cmd.exe", "/c", cc, "--help"]
+            else:
+                args = [cc, "--help"]
+            help_out = subprocess.check_output(args, stderr=subprocess.STDOUT, text=True, timeout=8).lower()
+            if "--effort" not in help_out:
+                return ""
+        except Exception:
+            return ""
+
+    try:
+        import assistant_core as _ac
+        current = _ac.get_backend_effort(backend)
+    except Exception:
+        current = ""
+
+    rows = [
+        {"value": "", "label": "default", "desc": "provider default effort"},
+        {"value": "low", "label": "low", "desc": "faster / cheaper"},
+        {"value": "medium", "label": "medium", "desc": "balanced"},
+        {"value": "high", "label": "high", "desc": "best reasoning quality"},
+    ]
+
+    selected = 0
+    for i, row in enumerate(rows):
+        if row["value"] == current:
+            selected = i
+            break
+
+    if has_msvcrt and RICH:
+        import msvcrt as _msvcrt
+        import sys as _sys
+        console.print(f"\n[bold cyan]Select Effort ({backend})[/bold cyan]  [dim]up/down, Enter, Esc[/dim]")
+        console.print("[dim]" + "─" * 54 + "[/dim]")
+
+        def _render(idx: int, is_sel: bool) -> str:
+            row = rows[idx]
+            safe = rescape(f"  {row['label']:<8} {row['desc']}")
+            if is_sel:
+                return f"[bold cyan]▶{safe}[/bold cyan]"
+            if row["value"] == current:
+                return f"[green]{safe}[/green] [dim]← current[/dim]"
+            return safe
+
+        line_count = len(rows)
+        for i in range(len(rows)):
+            console.print(_render(i, i == selected))
+
+        while True:
+            key = _msvcrt.getch()
+            moved = False
+            if key in (b'\xe0', b'\x00'):
+                key2 = _msvcrt.getch()
+                if key2 == b'H':
+                    selected = max(0, selected - 1)
+                    moved = True
+                elif key2 == b'P':
+                    selected = min(len(rows) - 1, selected + 1)
+                    moved = True
+            elif key == b'\r':
+                return rows[selected]["value"]
+            elif key == b'\x1b':
+                return None
+
+            if moved:
+                _sys.stdout.write(f"\033[{line_count}A")
+                _sys.stdout.flush()
+                for i in range(len(rows)):
+                    _sys.stdout.write("\033[2K\r")
+                    _sys.stdout.flush()
+                    console.print(_render(i, i == selected))
+        # unreachable
+
+    p(f"\nSelect effort ({backend}):")
+    for idx, row in enumerate(rows, start=1):
+        cur = " (current)" if row["value"] == current else ""
+        p(f"  {idx}. {row['label']:<8} {row['desc']}{cur}")
+    try:
+        ans = input("Enter number (or Enter to cancel): ").strip()
+    except Exception:
+        return None
+    if not ans:
+        return None
+    try:
+        pick = int(ans)
+    except ValueError:
+        return None
+    if 1 <= pick <= len(rows):
+        return rows[pick - 1]["value"]
+    return None
+
+
+def _print_ai_model_list(p) -> None:
+    """Show current model, backend status, and installed local models."""
+    if not HAVE_ASSISTANT:
+        p("[yellow]AI assistant not configured.[/yellow]")
+        return
+    try:
+        import assistant_core as _ac
+    except Exception as e:
+        p(f"[red]Could not load assistant_core:[/red] {e}")
+        return
+
+    cur_backend = _ac.get_active_backend()
+    cc_effort_supported = False
+    try:
+        cc = shutil.which("claude") or shutil.which("claude.cmd") or shutil.which("claude.exe")
+        if cc:
+            args = ["cmd.exe", "/c", cc, "--help"] if cc.lower().endswith((".cmd", ".bat")) else [cc, "--help"]
+            cc_help = subprocess.check_output(args, stderr=subprocess.STDOUT, text=True, timeout=8).lower()
+            cc_effort_supported = ("--effort" in cc_help)
+    except Exception:
+        cc_effort_supported = False
+    p(f"Current model: {_current_ai_model_label()}")
+    p("[dim]Change model: ai-model pick[/dim]")
+
+    p("\nBackends:")
+    for b in _ac.VALID_BACKENDS:
+        active = " [bold]← active[/bold]" if b == cur_backend else ""
+        if b == "ollama":
+            status = "[green]ready[/green]" if _check_ollama_alive() else "[yellow]offline[/yellow]"
+            extra = ""
+        elif b == "claude-code":
+            cc_ok = bool(shutil.which("claude") or shutil.which("claude.cmd"))
+            status = "[green]ready[/green]" if cc_ok else "[yellow]not found[/yellow]"
+            if cc_effort_supported:
+                eff = _ac.get_backend_effort("claude-code")
+                extra = f" [dim]effort: {eff or 'default'}[/dim]"
+            else:
+                extra = ""
+        else:
+            has_key = bool(_ac.get_api_key(b))
+            status = "[green]key ✓[/green]" if has_key else "[yellow]no key[/yellow]"
+            if b == "openai":
+                eff = _ac.get_backend_effort("openai")
+                extra = f" [dim]effort: {eff or 'default'}[/dim]"
+            else:
+                extra = ""
+        p(f"  {b:<12}{status}{extra}{active}")
+
+    names = _get_ollama_model_names()
+    if names:
+        p("\nInstalled Ollama models:")
+        for name in names:
+            p(f"  - {name}")
+    else:
+        p("\n[dim]Ollama models: none detected (or Ollama CLI not found).[/dim]")
+
+
+def op_model_pick(p) -> None:
+    """
+    Interactive model picker — arrow-key navigation on Windows, numbered list fallback.
+    Shows Claude Code CLI models, Ollama models, and API backend options.
+    """
+    try:
+        _op_model_pick_inner(p)
+    except Exception as e:
+        p(f"[red]Model picker error:[/red] {e}")
+
+
+def _op_model_pick_inner(p) -> None:
+    """Inner implementation of op_model_pick (exceptions bubble to outer wrapper)."""
+    if not HAVE_ASSISTANT:
+        p("[yellow]AI assistant not configured.[/yellow]")
+        return
+    try:
+        import assistant_core as _ac
+    except Exception as e:
+        p(f"[red]Could not load assistant_core:[/red] {e}")
+        return
+
+    try:
+        import msvcrt as _msvcrt
+        _has_msvcrt = True
+    except ImportError:
+        _has_msvcrt = False
+
+    # Rich escape helper — prevents [text] in labels from being parsed as markup
+    try:
+        from rich.markup import escape as _rescape
+    except Exception:
+        _rescape = lambda s: s  # noqa: E731
+
+    # ── Gather current state ──────────────────────────────────────────────
+    try:
+        cur_backend  = _ac.get_active_backend()
+        cur_model    = _ac._get_active_model()
+        cur_cc_model = _ac.get_claude_code_model()
+    except Exception:
+        cur_backend = "ollama"; cur_model = ""; cur_cc_model = ""
+
+    try:
+        has_anth_key = bool(_ac.get_api_key("anthropic"))
+    except Exception:
+        has_anth_key = False
+    try:
+        has_oai_key = bool(_ac.get_api_key("openai"))
+    except Exception:
+        has_oai_key = False
+
+    # ── Build item list ───────────────────────────────────────────────────
+    # Each item is a dict:
+    #   label    : plain text display string  (NO Rich markup embedded)
+    #   model    : model id string, or None for headers/separators
+    #   backend  : backend name, or None for headers
+    #   cc_model : specific claude model for claude-code backend
+    #   is_active: bool — is this the currently active selection?
+    items: list = []
+
+    def _hdr(plain_text: str):
+        items.append({"label": plain_text, "model": None, "backend": None,
+                      "cc_model": "", "is_active": False})
+
+    def _item(plain_label: str, model: str, backend: str, cc_model: str = ""):
+        is_active = (
+            backend == cur_backend and (
+                (backend == "claude-code" and cc_model == cur_cc_model)
+                or (backend != "claude-code" and model == cur_model)
+            )
+        )
+        items.append({"label": plain_label, "model": model, "backend": backend,
+                      "cc_model": cc_model, "is_active": is_active})
+
+    # Claude Code CLI
+    _hdr("── Claude Code CLI (no API key needed) ──────────────")
+    cc_models = getattr(_ac, "CLAUDE_CODE_MODELS", [
+        ("claude-haiku-4-5",  "Haiku  — fastest & cheapest"),
+        ("claude-sonnet-4-6", "Sonnet — balanced performance"),
+        ("claude-opus-4-6",   "Opus   — most capable"),
+    ])
+    for mid, desc in cc_models:
+        short = mid.replace("claude-", "")
+        _item(f"  {short:<14} {desc}", mid, "claude-code", cc_model=mid)
+    _item(f"  {'(default)':<14} Use CLI default model", "claude-code", "claude-code", cc_model="")
+
+    # Ollama
+    _hdr("── Ollama (local) ───────────────────────────────────")
+    ollama_models: list = []
+    try:
+        import requests as _req
+        _r = _req.get("http://localhost:11434/api/tags", timeout=2)
+        if _r.status_code == 200:
+            ollama_models = [m["name"] for m in _r.json().get("models", [])]
+    except Exception:
+        pass
+    if ollama_models:
+        for om in ollama_models[:8]:
+            _item(f"  {om}", om, "ollama")
+    else:
+        _hdr("  (Ollama offline or no models installed)")
+
+    # Anthropic API  — use (API) not [API] to avoid Rich markup interpretation
+    anth_note = "" if has_anth_key else "  (no key: run ai key set anthropic <key>)"
+    _hdr(f"── Anthropic API{anth_note} ─────────────────────────────")
+    for mid, desc in [
+        ("claude-haiku-4-5",  "Haiku  (Anthropic API)"),
+        ("claude-sonnet-4-6", "Sonnet (Anthropic API)"),
+        ("claude-opus-4-6",   "Opus   (Anthropic API)"),
+    ]:
+        short = mid.replace("claude-", "")
+        _item(f"  {short:<14} {desc}", mid, "anthropic")
+
+    # OpenAI  — plain text only
+    oai_note = "" if has_oai_key else "  (no key: run ai key set openai <key>)"
+    _hdr(f"── OpenAI API{oai_note} ──────────────────────────────────")
+    _item(f"  {'gpt-5.2':<14} GPT-5.2 (OpenAI API)", "gpt-5.2", "openai")
+
+    # ── Selectable indices ────────────────────────────────────────────────
+    selectable = [i for i, it in enumerate(items) if it["model"] is not None]
+    if not selectable:
+        p("[yellow]No selectable models found.[/yellow]")
+        return
+
+    # Find starting position at currently active model
+    sel_pos = 0
+    for si, gi in enumerate(selectable):
+        if items[gi].get("is_active"):
+            sel_pos = si
+            break
+
+    # ── Render a single item to a Rich markup string ──────────────────────
+    import sys as _sys
+
+    def _render(item: dict, is_sel: bool) -> str:
+        """
+        Convert an item to a Rich markup string.
+        Labels are plain text — escape them before embedding in markup.
+        """
+        safe = _rescape(item["label"])
+        if item["model"] is None:
+            # Header / separator
+            return f"[dim]{safe}[/dim]"
+        is_act = item.get("is_active", False)
+        if is_sel:
+            return f"[bold cyan]▶{safe}[/bold cyan]"
+        if is_act:
+            return f"[green]{safe}[/green] [dim]← active[/dim]"
+        return f"[dim]{safe}[/dim]" if item["model"] is None else safe
+
+    def _apply_choice(chosen: dict) -> None:
+        new_backend  = chosen["backend"]
+        new_model    = chosen["model"]
+        new_cc_model = chosen.get("cc_model", "")
+
+        if new_backend == "anthropic" and not has_anth_key:
+            p("[yellow]No Anthropic API key.[/yellow]  Run: ai key set anthropic <key>")
+            return
+        if new_backend == "openai" and not has_oai_key:
+            p("[yellow]No OpenAI API key.[/yellow]  Run: ai key set openai <key>")
+            return
+
+        picked_effort = _pick_effort_for_backend(p, new_backend, _has_msvcrt, _rescape)
+        if picked_effort is None:
+            p("[dim]Cancelled.[/dim]")
+            return
+
+        try:
+            from CMC_Config import (load_config as _lc, save_config as _sc,
+                                    set_config_value as _sv)
+            _cd = Path(__file__).parent
+            cfg = _lc(_cd)
+            cfg = _sv(cfg, "ai.model",             new_model)
+            cfg = _sv(cfg, "ai.backend",           new_backend)
+            cfg = _sv(cfg, "ai.claude_code_model", new_cc_model)
+            if new_backend == "claude-code":
+                cfg = _sv(cfg, "ai.claude_code_effort", picked_effort or "")
+            elif new_backend == "openai":
+                cfg = _sv(cfg, "ai.openai_effort", picked_effort or "")
+            _sc(cfg, _cd)
+            _ac.clear_manual_cache()
+            _ac.clear_history()
+        except Exception as e:
+            p(f"[red]Failed to save:[/red] {e}")
+            return
+
+        if new_backend == "claude-code":
+            display = new_cc_model.replace("claude-", "") if new_cc_model else "default"
+            p(f"[green]✓ Model:[/green] {display}  [dim]via claude-code CLI[/dim]")
+            p(f"[green]✓ Effort:[/green] {picked_effort or 'default'}")
+        elif new_backend == "openai":
+            p(f"[green]✓ Model:[/green] {new_model}  [dim]backend: {new_backend}[/dim]")
+            p(f"[green]✓ Effort:[/green] {picked_effort or 'default'}")
+        else:
+            p(f"[green]✓ Model:[/green] {new_model}  [dim]backend: {new_backend}[/dim]")
+        p("[dim]Header updates on next restart. AI will use the new model immediately.[/dim]")
+
+    # ── Arrow-key picker (Windows + Rich) ────────────────────────────────
+    if _has_msvcrt and RICH:
+        console.print("\n[bold cyan]Select AI Model[/bold cyan]  "
+                      "[dim]up/down arrows  Enter=confirm  Esc=cancel[/dim]")
+        console.print("[dim]" + "─" * 54 + "[/dim]")
+
+        # Initial render
+        cur_gi    = selectable[sel_pos]
+        lines_out = [_render(it, i == cur_gi) for i, it in enumerate(items)]
+        for ln in lines_out:
+            console.print(ln)
+        line_count = len(lines_out)
+
+        try:
+            while True:
+                key   = _msvcrt.getch()
+                moved = False
+
+                if key in (b'\xe0', b'\x00'):           # special key prefix
+                    key2 = _msvcrt.getch()
+                    if key2 == b'H':                     # ↑ up
+                        sel_pos = max(0, sel_pos - 1)
+                        moved   = True
+                    elif key2 == b'P':                   # ↓ down
+                        sel_pos = min(len(selectable) - 1, sel_pos + 1)
+                        moved   = True
+                elif key == b'\r':                       # Enter — confirm
+                    break
+                elif key == b'\x1b':                     # Esc — cancel
+                    # Move cursor back up and clear the picker lines
+                    _sys.stdout.write(f"\033[{line_count}A")
+                    for _ in range(line_count):
+                        _sys.stdout.write("\033[2K\n")
+                    _sys.stdout.write(f"\033[{line_count}A")
+                    _sys.stdout.flush()
+                    p("[dim]Cancelled.[/dim]")
+                    return
+
+                if moved:
+                    cur_gi    = selectable[sel_pos]
+                    new_lines = [_render(it, i == cur_gi) for i, it in enumerate(items)]
+                    _sys.stdout.write(f"\033[{line_count}A")
+                    _sys.stdout.flush()
+                    for ln in new_lines:
+                        _sys.stdout.write("\033[2K\r")
+                        _sys.stdout.flush()
+                        console.print(ln)
+                    line_count = len(new_lines)
+
+        except (KeyboardInterrupt, Exception):
+            p("\n[dim]Cancelled.[/dim]")
+            return
+
+        _apply_choice(items[selectable[sel_pos]])
+
+    else:
+        # ── Numbered fallback (no msvcrt) ─────────────────────────────────
+        p("\n[bold cyan]Select AI Model:[/bold cyan]")
+        num_map: dict = {}
+        n = 1
+        for it in items:
+            safe = _rescape(it["label"])
+            if it["model"] is None:
+                p(f"[dim]{safe}[/dim]")
+            else:
+                active_tag = " [dim](active)[/dim]" if it.get("is_active") else ""
+                # Use "n." format — avoid [n] which Rich would try to parse as markup
+                p(f"  [dim]{n}.[/dim] {safe}{active_tag}")
+                num_map[n] = it
+                n += 1
+        try:
+            ans = input("\nEnter number (or Enter to cancel): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            p("[dim]Cancelled.[/dim]")
+            return
+        if not ans:
+            p("[dim]Cancelled.[/dim]")
+            return
+        try:
+            chosen = num_map.get(int(ans))
+        except ValueError:
+            chosen = None
+        if not chosen:
+            p("[red]Invalid number.[/red]")
+            return
+        _apply_choice(chosen)
+
+
 def op_ports(p) -> None:
     """Show all listening ports with PID and process name."""
     rows = _get_listening_ports()
@@ -2665,8 +3219,8 @@ def op_kill_port(port: int, p) -> None:
 COMMAND_HINTS = [
     "pwd","cd","back","home","list","info","find","findext","recent","biggest","search",
     "create file","create folder","write","read","move","copy","rename","delete",
-    "ai-model list", "ai-model current", "ai-model set <model>", "model list", "model current", "model set <model>",
-    "ai backend list", "ai backend set <name>", "ai backend current",
+    "ai-model list", "ai-model current", "ai-model pick",
+    "model list", "model current", "model pick",
     "ai key set <backend> <key>", "ai key clear <backend>", "ai key detect",
     "zip","unzip","open","explore","backup","run",
     "download","downloadlist","open url",
@@ -2888,192 +3442,30 @@ def handle_command(s: str):
 
         if len(parts) == 1 or (len(parts) >= 2 and parts[1].lower() in ("help", "?", "-h", "--help")):
             p("Usage:")
+            p("  ai-model pick            [dim]← interactive picker (↑↓ arrows)[/dim]" if RICH else "  ai-model pick")
             p("  ai-model list")
             p("  ai-model current")
-            p("  ai-model set <model>")
             p("Alias:")
-            p("  model list|current|set <model>")
+            p("  model pick|list|current")
             return
 
         sub = parts[1].lower()
 
+        # ── model pick / model select ──────────────────────────────────────
+        if sub in ("pick", "select"):
+            op_model_pick(p)
+            return
+
         if sub == "list":
-            try:
-                ollama_cmd = shutil.which("ollama") or shutil.which("ollama.exe")
-                if not ollama_cmd:
-                    candidates = [
-                        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe",
-                        Path(os.environ.get("ProgramFiles", "")) / "Ollama" / "ollama.exe",
-                        Path(os.environ.get("ProgramFiles(x86)", "")) / "Ollama" / "ollama.exe",
-                    ]
-                    for cand in candidates:
-                        if str(cand).strip() and cand.exists():
-                            ollama_cmd = str(cand)
-                            break
-
-                if not ollama_cmd:
-                    p("[yellow]Ollama CLI not found.[/yellow] Install Ollama or add it to PATH.")
-                    p("[dim]Then retry: ai-model list[/dim]")
-                    return
-
-                out = subprocess.check_output([ollama_cmd, "list"], stderr=subprocess.STDOUT, text=True)
-                names = []
-                for line in out.splitlines():
-                    line = line.strip()
-                    if not line:
-                        continue
-                    head = line.split()[0]
-                    if head.upper() == "NAME":
-                        continue
-                    names.append(head)
-
-                if not names:
-                    p("[yellow]No models found (ollama list returned no entries).[/yellow]")
-                else:
-                    p("Available models:")
-                    for name in names:
-                        p(f"  - {name}")
-            except Exception as e:
-                p(f"[red]Failed to list Ollama models.[/red] {e}")
+            _print_ai_model_list(p)
             return
 
         if sub == "current":
-            cur_model = get_ai_model()
-            try:
-                import assistant_core as _ac
-                cur_backend = _ac.get_active_backend()
-            except Exception:
-                cur_backend = "ollama"
-            p(f"AI model:   {cur_model}")
-            p(f"Backend:    {cur_backend}")
+            p(_current_ai_model_with_effort_label())
             return
 
         if sub == "set":
-            if len(parts) < 3:
-                p("[red]Missing model name.[/red]  Example: ai-model set claude")
-                p("  Aliases: claude, claude-opus, claude-haiku, codex, chatgpt, gpt")
-                p("  Or use a full model ID: ai-model set qwen2.5:14b-instruct")
-                return
-            raw_name  = " ".join(parts[2:]).strip()
-
-            # Resolve friendly alias → full model ID, detect backend
-            try:
-                import assistant_core as _ac
-                new_model  = _ac.resolve_model_name(raw_name)
-                new_backend = _ac.detect_backend_for_model(new_model)
-            except Exception:
-                new_model  = raw_name
-                new_backend = "ollama"
-
-            # claude-code uses the local CLI — no API key needed, just verify it works
-            if new_backend == "claude-code":
-                import shutil as _shutil
-                if not (_shutil.which("claude") or _shutil.which("claude.cmd")):
-                    p("[red]Claude Code CLI not found in PATH.[/red]")
-                    p("Make sure Claude Code is installed and `claude` works in your terminal.")
-                    return
-                # No key check needed — falls through to save model + backend
-
-            # For API backends: check key; try auto-detect for openai; prompt if still missing
-            elif new_backend not in ("ollama",):
-                try:
-                    import assistant_core as _ac
-                    existing_key = _ac.get_api_key(new_backend)
-                except Exception:
-                    existing_key = None
-                if not existing_key:
-                    # For openai: try to auto-detect from Codex CLI config first
-                    if new_backend == "openai":
-                        try:
-                            import assistant_core as _ac
-                            detected = _ac.get_codex_api_key()
-                        except Exception:
-                            detected = None
-                        if detected:
-                            masked = detected[:8] + "..." + detected[-4:]
-                            p(f"[green]Found OpenAI key in Codex CLI config:[/green] {masked}")
-                            p("Use this key? (yes / no)")
-                            try:
-                                answer = input("  > ").strip().lower()
-                            except Exception:
-                                answer = ""
-                            if answer in ("yes", "y"):
-                                try:
-                                    import assistant_core as _ac
-                                    _ac.set_api_key("openai", detected)
-                                    existing_key = detected
-                                    p("[green]Key saved.[/green]")
-                                except Exception as e:
-                                    p(f"[red]Failed to save key:[/red] {e}")
-                                    return
-                            else:
-                                p("[yellow]Skipped auto-detected key.[/yellow]")
-
-                    if not existing_key:
-                        p(f"[yellow]Backend:[/yellow] {new_backend}  (model: {new_model})")
-                        p(f"No API key configured for [bold]{new_backend}[/bold].")
-                        p("Paste your key below (or press Enter to cancel):")
-                        try:
-                            typed_key = input("  Key: ").strip()
-                        except Exception:
-                            typed_key = ""
-                        if not typed_key:
-                            p("[yellow]Cancelled — model not changed.[/yellow]")
-                            return
-                        try:
-                            import assistant_core as _ac
-                            _ac.set_api_key(new_backend, typed_key)
-                            p(f"[green]Key saved for {new_backend}.[/green]")
-                        except Exception as e:
-                            p(f"[red]Failed to save key:[/red] {e}")
-                            return
-
-            # Persist model + backend in config
-            try:
-                from CMC_Config import load_config as _cfg_load, save_config as _cfg_save
-                cfg_dir  = Path(__file__).parent
-                cfg_path = cfg_dir / "CMC_Config.json"
-
-                cfg = _cfg_load(cfg_dir) if callable(_cfg_load) else {}
-                if not isinstance(cfg, dict):
-                    cfg = {}
-                if not isinstance(cfg.get("ai"), dict):
-                    cfg["ai"] = {}
-                cfg["ai"]["model"]   = new_model
-                cfg["ai"]["backend"] = new_backend
-
-                if callable(_cfg_save):
-                    _cfg_save(cfg, cfg_dir)
-
-                verify = _cfg_load(cfg_dir) if callable(_cfg_load) else cfg
-                persisted = None
-                if isinstance(verify, dict):
-                    persisted = (verify.get("ai", {}) or {}).get("model")
-                if persisted != new_model:
-                    p(f"[red]Failed to persist AI model.[/red] Check write access to {cfg_path}")
-                    return
-
-                CONFIG = verify if isinstance(verify, dict) else cfg
-            except Exception as e:
-                p(f"[red]Failed to save AI model to config.[/red] {e}")
-                return
-
-            # Sync assistant runtime
-            try:
-                import assistant_core as _ac
-                if hasattr(_ac, "clear_manual_cache"):
-                    _ac.clear_manual_cache()
-                if hasattr(_ac, "clear_history"):
-                    _ac.clear_history()
-            except Exception:
-                pass
-
-            if new_model != raw_name:
-                p(f"[green]AI model:[/green] {new_model}  [dim](alias: {raw_name})[/dim]")
-            else:
-                p(f"[green]AI model:[/green] {new_model}")
-            p(f"[green]Backend:[/green]  {new_backend}")
-            p("[dim]AI conversation history cleared.[/dim]")
+            p("[yellow]`ai-model set` was removed.[/yellow] Use [cyan]ai-model pick[/cyan].")
             return
 
 
@@ -3102,52 +3494,9 @@ def handle_command(s: str):
 
         sub = user_query.lower()
 
-        # ── ai backend … ──────────────────────────────────────────────────
+        # ── ai backend … (removed; merged into ai-model list/pick/current) ──
         if sub.startswith("backend"):
-            if not HAVE_ASSISTANT:
-                p("[yellow]AI assistant not configured.[/yellow]")
-                return
-            try:
-                import assistant_core as _ac
-            except Exception as e:
-                p(f"[red]Could not load assistant_core:[/red] {e}")
-                return
-
-            be_parts = user_query.split()
-            be_sub   = be_parts[1].lower() if len(be_parts) > 1 else "list"
-
-            if be_sub == "list":
-                cur = _ac.get_active_backend()
-                for b in _ac.VALID_BACKENDS:
-                    if b in ("ollama", "claude-code"):
-                        key_tag = "[dim]no key needed[/dim]"
-                    elif bool(_ac.get_api_key(b)):
-                        key_tag = "[green]key ✓[/green]"
-                    else:
-                        key_tag = "[yellow]no key[/yellow]"
-                    active = " [bold]← active[/bold]" if b == cur else ""
-                    p(f"  {b:<14}{key_tag}{active}")
-
-            elif be_sub == "set":
-                if len(be_parts) < 3:
-                    p("[red]Usage:[/red] ai backend set <ollama|claude-code|anthropic|openai|openrouter>")
-                    return
-                new_be = be_parts[2].lower()
-                if new_be not in _ac.VALID_BACKENDS:
-                    p(f"[red]Unknown backend:[/red] {new_be}")
-                    p(f"Valid: {', '.join(_ac.VALID_BACKENDS)}")
-                    return
-                _ac.set_active_backend(new_be)
-                _ac.clear_manual_cache()
-                _ac.clear_history()
-                p(f"[green]Backend set to:[/green] {new_be}")
-
-            elif be_sub == "current":
-                p(f"Active backend: {_ac.get_active_backend()}")
-                p(f"Active model:   {_ac._get_active_model()}")
-
-            else:
-                p("Usage:  ai backend list | set <name> | current")
+            p("[yellow]`ai backend ...` was removed.[/yellow] Use [cyan]ai-model list[/cyan] / [cyan]ai-model pick[/cyan] / [cyan]ai-model current[/cyan].")
             return
 
         # ── ai key … ──────────────────────────────────────────────────────
@@ -3199,7 +3548,7 @@ def handle_command(s: str):
                     p("[dim]Subscription tokens cannot be used with the OpenAI API directly.[/dim]")
                     p("")
                     p("Options:")
-                    p("  model set claude-code        Use Claude Code CLI (no API key required)")
+                    p("  ai-model pick                Choose Claude Code CLI (no API key required)")
                     p("  ai key set openai <key>      Set an OpenAI API key manually")
                     p("  [dim]Get a key at: platform.openai.com/api-keys[/dim]")
                 elif codex_info.get("api_key"):
@@ -3214,7 +3563,7 @@ def handle_command(s: str):
                     if answer in ("yes", "y"):
                         _ac.set_api_key("openai", found_key)
                         p("[green]Key saved.[/green]")
-                        p("[dim]Use:  model set codex   or   model set gpt[/dim]")
+                        p("[dim]Use: ai-model pick[/dim]")
                     else:
                         p("[yellow]Cancelled.[/yellow]")
                 else:
@@ -3975,8 +4324,27 @@ def handle_command(s: str):
 
 
     # ---------- Macros (inline) ----------
+    # "macro add name =" with no body → start interactive/continuation input
+    m = re.match(r"^macro\s+add\s+([A-Za-z0-9_\-]+)\s*=\s*$", s, re.I)
+    if m:
+        global _MACRO_CONT_NAME, _MACRO_CONT_PARTS
+        _MACRO_CONT_NAME = m.group(1).strip()
+        _MACRO_CONT_PARTS = []
+        p(f"[cyan]Macro '{_MACRO_CONT_NAME}':[/cyan] Paste or type commands (end with an empty line or 'done').")
+        return
+
+    # "macro add name = body" — detect trailing comma → continuation mode
     m = re.match(r"^macro\s+add\s+([A-Za-z0-9_\-]+)\s*=\s*(.+)$", s, re.I)
-    if m: macro_add(m.group(1), m.group(2)); return
+    if m:
+        _mac_name = m.group(1).strip()
+        _mac_text = m.group(2).strip()
+        if _mac_text.endswith(","):
+            _MACRO_CONT_NAME = _mac_name
+            _MACRO_CONT_PARTS = [_mac_text.rstrip(",").strip()]
+            p(f"[dim]Macro '{_mac_name}' — paste the next line (or type 'done' to finish):[/dim]")
+        else:
+            macro_add(_mac_name, _mac_text)
+        return
     m = re.match(r"^macro\s+run\s+([A-Za-z0-9_\-]+)$", s, re.I)
     if m: macro_run(m.group(1)); return
     m = re.match(r"^macro\s+edit\s+([A-Za-z0-9_\-]+)$", s, re.I)
@@ -4569,29 +4937,18 @@ AI manual tiers (auto-selected by backend):
 • ai fix             Auto-diagnose the last failed command.
 • ai clear           Reset conversation history.
 
-Model & backend control
------------------------
-• model set <name>           Switch model. Accepts aliases or full IDs.
-  No-key aliases (use what you already have installed):
-    model set claude-code               Uses your Claude Code CLI
-  Cloud aliases (will ask for API key if not saved):
-    model set claude                    Claude Sonnet (Anthropic API)
-    model set claude-opus               Claude Opus
-    model set claude-haiku              Claude Haiku
-    model set codex                     GPT-5.3-codex (OpenAI)
-    model set gpt                       GPT-5.2 (OpenAI)
-  Full model IDs also work:
-    model set qwen2.5:14b-instruct
-    model set meta-llama/llama-3.1-8b   (auto-routes to openrouter)
+Model control
+-------------
+• ai-model pick             Interactive model picker. For Claude/OpenAI, a 2nd picker sets effort.
+• ai-model current          Show current model + effort (single line).
+• ai-model list             Show current model, backend status, effort, and local Ollama models.
+• Aliases: model pick | model current | model list
 
-• model current              Show active model and backend.
-• model list                 List installed Ollama models.
-
-Backend management
-------------------
-• ai backend list                        Show all backends + key status + active.
-• ai backend set <name>                  Switch backend directly.
-• ai backend current                     Show current backend and model.
+Effort
+------
+• Effort levels: default, low, medium, high
+• Claude Code effort is used only when your installed `claude` CLI supports `--effort`.
+• OpenAI effort is sent for supported reasoning model families (gpt-5/o1/o3/o4/codex).
 
 API key management
 ------------------
@@ -4603,7 +4960,7 @@ API key management
   Env vars also work: ANTHROPIC_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY
 
 Quick start (no API key):
-  model set claude-code
+  ai-model pick
   ai how do I zip this folder and push it to git?
 """
 
@@ -4933,8 +5290,8 @@ def complete_command(text, state):
 
     # Control
     "help", "exit",
-    "ai-model list", "ai-model current", "ai-model set", "model list", "model current", "model set",
-    "ai backend list", "ai backend set", "ai backend current",
+    "ai-model list", "ai-model current", "ai-model pick",
+    "model list", "model current", "model pick",
     "ai key set", "ai key clear", "ai key detect",
 ]
 
@@ -5077,9 +5434,8 @@ def build_completer():
         "java list", "java version", "java change", "java reload",
         # AI
         "ai", "ai fix", "ai clear",
-        "ai-model list", "ai-model current", "ai-model set",
-        "model list", "model current", "model set",
-        "ai backend list", "ai backend set", "ai backend current",
+        "ai-model list", "ai-model current", "ai-model pick",
+        "model list", "model current", "model pick",
         "ai key set", "ai key clear", "ai key detect",
         # Config
         "config list", "config get", "config set", "config reset",
@@ -5144,6 +5500,7 @@ style = Style.from_dict({
 
 def main():
     global CWD
+    global _MACRO_CONT_NAME, _MACRO_CONT_PARTS
 
     # Give the background update-check thread a moment to finish before painting
     # the header — it's fast (git fetch locally), so 1.5s is more than enough.
@@ -5197,6 +5554,31 @@ def main():
         except (EOFError, KeyboardInterrupt):
             print()
             break
+
+        # ── Macro continuation mode ────────────────────────────────────────
+        # If a previous macro add ended with a trailing comma (or had no body),
+        # each subsequent input line is appended until a non-comma line or 'done'.
+        if _MACRO_CONT_NAME:
+            stripped = line.strip()
+            if stripped.lower() == "done" or stripped == "":
+                if _MACRO_CONT_PARTS:
+                    macro_add(_MACRO_CONT_NAME, ", ".join(_MACRO_CONT_PARTS))
+                else:
+                    p("[yellow]Macro cancelled (no commands entered).[/yellow]")
+                _MACRO_CONT_NAME = ""
+                _MACRO_CONT_PARTS = []
+            else:
+                chunk = stripped.rstrip(",").strip()
+                if chunk:
+                    _MACRO_CONT_PARTS.append(chunk)
+                if stripped.endswith(","):
+                    p(f"[dim]  ...continuing '{_MACRO_CONT_NAME}' (paste next line or type 'done' to save):[/dim]")
+                else:
+                    macro_add(_MACRO_CONT_NAME, ", ".join(_MACRO_CONT_PARTS))
+                    _MACRO_CONT_NAME = ""
+                    _MACRO_CONT_PARTS = []
+            continue
+        # ──────────────────────────────────────────────────────────────────
 
         for part in split_commands(line):
             # Prevent timer from splitting its message argument
