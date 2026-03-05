@@ -34,7 +34,15 @@ Splitter behavior:
 - Some commands allow unquoted input (cd, open url, search web query text).
 - For AI reliability, always use single-quoted paths.
 
-1.5 Execution model
+1.5 Critical syntax traps (common AI mistakes)
+- macro add and alias add REQUIRE an equals sign:
+  CORRECT: macro add deploy = batch on, git update "deploy"
+  WRONG:   macro add deploy batch on, git update "deploy"
+  CORRECT: alias add dl = explore '%HOME%/Downloads'
+  WRONG:   alias add dl explore '%HOME%/Downloads'
+- The = sign is NOT optional. Without it, the command WILL FAIL silently or be misinterpreted.
+
+1.6 Execution model
 - CMC keeps its own virtual working directory (CWD variable).
 - CMC does not call os.chdir() for normal navigation.
 - Most commands respect CMC CWD, but see known defects section for exceptions.
@@ -303,18 +311,61 @@ Behavior:
 - Splits {ENTER} tokens and presses Enter between chunks.
 
 ============================================================
-11) PORT COMMANDS
+11) NETWORK & CONNECTIVITY
 ============================================================
 
-- ports
-- kill <port_number>
+11.1 Connectivity
+- ping <host>                   Ping a host (4 packets)
+- netcheck                     Test internet connectivity (checks Google DNS, Cloudflare, Google, GitHub)
+- traceroute <host>             Trace network route to host (uses Windows tracert)
 
-Behavior:
-- ports lists TCP LISTEN sockets with PID and process name (psutil).
-- kill <port> kills processes listening on that TCP port.
+11.2 Info
+- ip                           Show local IPv4, primary outbound IP, and public IP
+- dns <domain>                 DNS lookup (IPv4 and IPv6 records)
+- wifi                         Show WiFi SSID, signal strength, speed, channel, auth
+- mobile                      Show mobile broadband (cellular) connection info
+- net status                   Show all network adapters with IP, subnet, gateway, DNS, MAC
+- speedtest                   Download speed test (~1 MB file, shows Mbps)
+
+11.3 Web
+- headers <url>                Show HTTP response headers (status, content-type, etc.)
+  - Auto-prefixes https:// if no protocol given
+  - Respects ssl_verify flag
+
+11.4 Ports
+- ports                        List TCP LISTEN sockets with PID and process name
+- kill <port_number>           Kill processes listening on that TCP port
+
+11.5 Maintenance
+- flush dns                    Flush the Windows DNS resolver cache
 
 ============================================================
-12) INTERNET/DOWNLOAD COMMANDS
+12) MEDIA TOOLS (FFmpeg)
+============================================================
+
+Requires FFmpeg installed (winget install Gyan.FFmpeg).
+If FFmpeg is not found, CMC will show install instructions.
+
+12.1 Convert
+- convert '<file>' to <format>     Convert to any format (mp3, mp4, gif, wav, avi, mkv, flac, webm ...)
+- extract audio '<video>'          Extract audio track from video (→ .mp3)
+
+12.2 Edit
+- trim '<file>' <start> <end>      Cut a section (e.g. trim 'v.mp4' 0:30 1:45)
+- resize '<file>' <WxH>            Resize video or image (e.g. resize 'v.mp4' 1280x720)
+- rotate '<file>' <degrees>        Rotate video (90, 180, 270)
+- volume '<file>' <level>          Adjust audio volume (e.g. 50%, 200%)
+
+12.3 Optimize
+- compress '<file>'                Reduce file size (lower quality, smaller file)
+- merge '<file1>' '<file2>'        Concatenate media files (2 or more)
+
+12.4 Info
+- media info '<file>'              Show duration, resolution, codec, bitrate
+- thumbnail '<video>' [time]       Extract a frame as image (default: 0:05)
+
+============================================================
+13) INTERNET/DOWNLOAD COMMANDS
 ============================================================
 
 12.1 Open URL directly
@@ -339,16 +390,20 @@ Download behavior details:
 - After download, asks whether to open containing folder.
 
 ============================================================
-13) MACROS
+14) MACROS
 ============================================================
 
 13.1 Commands
-- macro add <name> = <command_chain>
+- macro add <name> = <command_chain>     ← the = sign is REQUIRED
 - macro run <name>
 - macro edit <name>
 - macro list
 - macro delete <name>
 - macro clear
+
+CRITICAL: The = sign between <name> and <command_chain> is mandatory.
+  CORRECT: macro add deploy = batch on, git update "ship it"
+  WRONG:   macro add deploy batch on, git update "ship it"
 
 13.2 Macro variables expanded at runtime
 - %DATE% -> YYYY-MM-DD
@@ -363,13 +418,17 @@ Download behavior details:
 - Stored in ~/.ai_helper/macros.json
 
 ============================================================
-14) ALIASES
+15) ALIASES
 ============================================================
 
 14.1 Commands
-- alias add <name> = <command>
+- alias add <name> = <command>           ← the = sign is REQUIRED
 - alias delete <name>
 - alias list
+
+CRITICAL: The = sign between <name> and <command> is mandatory.
+  CORRECT: alias add dl = explore '%HOME%/Downloads'
+  WRONG:   alias add dl explore '%HOME%/Downloads'
 
 14.2 Alias expansion behavior
 - Alias expansion occurs early in routing.
@@ -384,7 +443,7 @@ Download behavior details:
 - Stored in ~/.ai_helper/aliases.json
 
 ============================================================
-15) CONFIG COMMANDS
+16) CONFIG COMMANDS
 ============================================================
 
 15.1 Commands
@@ -419,7 +478,7 @@ Download behavior details:
 - ai.model is not in DEFAULT_CONFIG schema, so config command does not manage it.
 
 ============================================================
-16) JAVA COMMANDS
+17) JAVA COMMANDS
 ============================================================
 
 16.1 Commands
@@ -441,7 +500,7 @@ Download behavior details:
 - Reads JAVA_HOME from registry (user/system), applies to process env.
 
 ============================================================
-17) SYSTEM INFO
+18) SYSTEM INFO
 ============================================================
 
 - sysinfo
@@ -450,7 +509,7 @@ Download behavior details:
 Outputs OS/CPU/cores/RAM/GPU/PSU/uptime summary.
 
 ============================================================
-18) SPACE COMMAND (DISK USAGE)
+19) SPACE COMMAND (DISK USAGE)
 ============================================================
 
 Entry route:
@@ -489,7 +548,7 @@ Caveat:
   but current CMC_Space implementation uses hardcoded defaults unless command arguments override.
 
 ============================================================
-19) PATH INDEX COMMANDS
+20) PATH INDEX COMMANDS
 ============================================================
 
 19.1 /find
@@ -510,13 +569,8 @@ Behavior details:
 - For drive-letter style input (C D E), this still works in practice.
 - /build with no targets currently errors.
 
-19.3 /qcount
-- Route exists, but currently imports quick_count from path_index_local.py.
-- quick_count is missing in current module.
-- Result: /qcount fails in this build.
-
 ============================================================
-20) AI COMMANDS
+21) AI COMMANDS
 ============================================================
 
 20.1 Assistant commands
@@ -608,7 +662,7 @@ Key resolution order (per backend):
 - Backend default: "ollama" (in DEFAULT_CONFIG).
 
 ============================================================
-21) GIT COMMANDS (CMC_Git.py)
+22) GIT COMMANDS (CMC_Git.py)
 ============================================================
 
 21.1 Core supported commands
@@ -681,7 +735,7 @@ Practical guidance:
 - Deletes remote GitHub repo only; local files remain.
 
 ============================================================
-22) DOCKER COMMANDS (CMC_Docker.py)
+23) DOCKER COMMANDS (CMC_Docker.py)
 ============================================================
 
 22.1 Container inspection/control
@@ -785,7 +839,7 @@ Run details:
 - Unrecognized docker ... commands are forwarded to real docker CLI.
 
 ============================================================
-23) PROJECT SCAFFOLD/DEV/ENV COMMANDS (CMC_Scaffold.py)
+24) PROJECT SCAFFOLD/DEV/ENV COMMANDS (CMC_Scaffold.py)
 ============================================================
 
 23.1 setup
@@ -827,7 +881,7 @@ Run details:
 - If setup path reaches those calls, it can error.
 
 ============================================================
-24) WEB CREATE WIZARD (USED BY `new web`)
+25) WEB CREATE WIZARD (USED BY `new web`)
 ============================================================
 
 Interactive flow:
@@ -844,7 +898,7 @@ Generated components include:
 - root README.md
 
 ============================================================
-25) UPDATE COMMANDS
+26) UPDATE COMMANDS
 ============================================================
 
 25.1 Commands
@@ -874,37 +928,18 @@ Caution:
 - cmc update in git mode is destructive to uncommitted tracked changes due hard reset.
 
 ============================================================
-26) REMOVED OR NON-ROUTED LEGACY NAMES
+27) IMPORTANT: NON-EXISTENT COMMANDS — DO NOT USE
 ============================================================
 
-26.1 Removed legacy command names (do not use):
-- websetup
-- webcreate (direct command; now replaced by new web route)
-- projectsetup
+The following slash commands DO NOT EXIST and must NEVER be generated:
+- /gitsetup, /gitlink, /gitupdate, /gitpull, /gitstatus, /gitlog
+- /gitbranch, /gitignore add, /gitclean, /gitdoctor, /gitfix, /gitlfs setup
+- websetup, webcreate, projectsetup, projectscan
 
-26.2 Names suggested in hints/autocomplete but not routed:
-- /gitsetup
-- /gitlink
-- /gitupdate
-- /gitpull
-- /gitstatus
-- /gitlog
-- /gitbranch
-- /gitignore add
-- /gitclean
-- /gitdoctor
-- /gitfix
-- /gitlfs setup
-
-Additional mismatches:
-- projectscan command has been fully removed (handler deleted from handle_command).
-- /qcount route calls missing quick_count in path_index_local.py (fails).
-- Help text mentions download_list and optional output filename for download; parser accepts only:
-  - download '<url>' to '<dest_folder>'
-  - downloadlist '<urls_file>' to '<dest_folder>'
+Use the correct git commands instead (e.g. git doctor, git link, git update, git status, git log).
 
 ============================================================
-27) RELIABILITY TEMPLATES FOR AI-GENERATED MACROS
+28) RELIABILITY TEMPLATES FOR AI-GENERATED MACROS
 ============================================================
 
 Use these exact templates when generating commands for users.
@@ -937,7 +972,7 @@ Use these exact templates when generating commands for users.
 - env check
 
 ============================================================
-28) STRICT COMMAND INDEX (ONE-LINE FORMS)
+29) STRICT COMMAND INDEX (ONE-LINE FORMS)
 ============================================================
 
 Control:
@@ -1012,8 +1047,33 @@ Shell/run:
 - sleep <sec>
 - timer <sec> [action_or_message]
 - sendkeys "text{ENTER}"
+
+Network:
+- ping <host>
+- ip
+- dns <domain>
+- traceroute <host>
+- netcheck
+- wifi
+- mobile
+- speedtest
+- net status
+- headers <url>
 - ports
 - kill <port>
+- flush dns
+
+Media (FFmpeg):
+- convert '<file>' to <format>
+- extract audio '<file>'
+- trim '<file>' <start> <end>
+- resize '<file>' <WxH>
+- rotate '<file>' <degrees>
+- volume '<file>' <level>
+- compress '<file>'
+- merge '<file1>' '<file2>'
+- media info '<file>'
+- thumbnail '<file>' [time]
 
 Web/download:
 - open url <url>
@@ -1022,7 +1082,7 @@ Web/download:
 - download '<url>' to '<dest_folder>'
 - downloadlist '<urls_file>' to '<dest_folder>'
 
-Macros/aliases:
+Macros/aliases (= sign is REQUIRED):
 - macro add <name> = <chain>
 - macro run <name>
 - macro edit <name>
@@ -1053,8 +1113,6 @@ Space/index:
 - space '<path>' [depth <n>] [report] [full]
 - /build C D E
 - /find <query> [limit]
-- /qcount (currently broken)
-
 AI:
 - ai <question>
 - ai fix

@@ -333,7 +333,7 @@ def _git_run(args: List[str], cwd: Union[str, Path], identity: Optional[GitIdent
     cmd += args
 
     try:
-        r = subprocess.run(cmd, cwd=str(cwd), text=True, capture_output=True)
+        r = subprocess.run(cmd, cwd=str(cwd), text=True, encoding="utf-8", capture_output=True)
         out = (r.stdout or "").strip()
         err = (r.stderr or "").strip()
         combined = (out + ("\n" + err if err else "")).strip()

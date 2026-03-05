@@ -1,51 +1,42 @@
-Computer Main Centre - Release Notes (19/02/2026)
+Computer Main Centre - Release Notes (05/03/2026)
 
-[ Header & Status ]
+[ UTF-8 Fix ]
 
-- Header is now compact and minimal — shows Batch, Dry-Run, AI model, and CMC update status
-- SSL and Java version moved out of the header and into the 'status' command
-- 'status' command now shows a full panel: all modes, AI model, Java, CMC update, macro/alias counts, and undo depth
-- CMC update status now checks in the background on startup so the console opens instantly
-- Update check now works for zip installs (no longer requires a .git folder)
+- Fixed AI outputting garbled characters (e.g. "Ã¤" instead of "ä")
+- All subprocess calls now use explicit UTF-8 encoding
 
-[ First-Time Welcome ]
+[ Network Toolkit — help 13 ]
 
-- First launch shows a welcome panel and pre-fills 'help' in the prompt
-- Only appears once, never shown again after that
+- New commands: ping, ip, dns, traceroute, netcheck, wifi, mobile, speedtest, net status, headers, flush dns
+- 'wifi' shows SSID, signal, speed, channel, auth
+- 'mobile' shows cellular/mobile broadband connection info
+- 'speedtest' runs a real download speed test (shows Mbps)
+- Existing 'ports' and 'kill' commands moved here from Automation
 
-[ AI Assistant ]
+[ Media Tools (FFmpeg) — help 14 ]
 
-- AI now sees the full body of your macros and aliases, not just their names
-- Added conversation history — follow-up questions work within a session
-- Added 'ai fix' — automatically diagnoses the last failed command
-- Added 'ai clear' — resets conversation history
-- AI answers are short by default; ask for more detail if needed
-- Switched to llama3.1:8b (light) and qwen2.5:14b-instruct (heavy) models
+- convert 'file' to mp3/mp4/gif/wav/avi/mkv/flac/webm — convert between any format
+- extract audio 'video.mp4' — pull audio from video
+- trim 'file' start end — cut a clip
+- resize 'file' WxH — resize video or image
+- rotate 'file' 90/180/270 — rotate video
+- volume 'file' 50%/200% — adjust audio volume
+- compress 'file' — reduce file size (shows % saved)
+- merge 'file1' 'file2' — concatenate media files
+- media info 'file' — show duration, codec, bitrate, resolution
+- thumbnail 'video' time — extract a frame as image
+- Auto-detects FFmpeg even if not in PATH (searches common install locations)
 
-[ Undo ]
+[ AI Manuals ]
 
-- Undo now works on almost everything: file delete (recoverable via trash), copy,
-  create file/folder, write (restores old content), macro add/delete/clear,
-  alias add/delete, config set/reset
-- Undo history keeps up to 30 steps
+- Fixed AI forgetting the = sign in macro/alias commands
+- Added WRONG/RIGHT examples to all 3 manuals and system prompts
+- Removed broken /qcount command from code and manuals
+- Removed fake slash commands (/gitsetup, /gitlink, etc.) from medium manual
 
-[ Macros ]
+[ Help Sections Reorganized ]
 
-- Commands now chain with commas:  macro add backup = pwd, list, git update
-- Macro list display has clear row separators
-
-[ Java ]
-
-- 'java change' now updates both JAVA_HOME and the user Path in the registry
-- Prompts for UAC elevation if system-level changes are needed
-
-[ Project Structure ]
-
-- All Python source files moved into src/ folder
-- Manuals moved into manuals/ folder
-- Root folder now contains only Start_CMC.vbs, README, setup script, and config files
-
-[ Removed ]
-
-- Observer system fully removed (it never worked)
-- Broken commands removed from help and manuals: whereami, ls, dir, head, tail, count, shell
+- 13 = Network & Connectivity
+- 14 = Media Tools (FFmpeg)
+- 15 = Docker
+- 16 = Flags & Modes

@@ -93,6 +93,7 @@ def _run(cmd: list, cwd: Optional[Path] = None, capture: bool = True):
         r = subprocess.run(
             cmd, cwd=str(cwd) if cwd else None,
             text=True,
+            encoding="utf-8",
             stdout=subprocess.PIPE if capture else None,
             stderr=subprocess.STDOUT if capture else None,
         )

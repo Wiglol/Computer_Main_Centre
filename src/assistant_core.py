@@ -199,6 +199,12 @@ def _build_prompt_prefix_small(ctx: str) -> str:
         "  WRONG: cd 'C:/path' and create folder 'test'\n"
         "  RIGHT: cd 'C:/path', create folder 'test'\n\n"
 
+        "MACROS/ALIASES — the = sign is REQUIRED:\n"
+        "  WRONG: macro add deploy batch on, git update \"ship\"\n"
+        "  RIGHT: macro add deploy = batch on, git update \"ship\"\n"
+        "  WRONG: alias add dl explore '%HOME%/Downloads'\n"
+        "  RIGHT: alias add dl = explore '%HOME%/Downloads'\n\n"
+
         "CMC-ONLY COMMANDS — NEVER suggest shell/OS commands:\n"
         "  BANNED: mkdir, rm, rmdir, ls, dir, del, grep, cat, touch\n"
         "  USE INSTEAD: create folder, delete, list, move, copy, rename, find, info, echo\n\n"
@@ -244,6 +250,10 @@ def _build_prompt_prefix_large(ctx: str) -> str:
         "CHAINING — comma-separated, no trailing comma:\n"
         "  cd 'C:/path', create folder 'test' in 'C:/path', list\n"
         "  batch on, zip 'C:/proj' to 'C:/Desktop', git update \"release\", batch off\n\n"
+
+        "MACROS & ALIASES — the = sign is mandatory:\n"
+        "  macro add deploy = batch on, git update \"ship it\"\n"
+        "  alias add dl = explore '%HOME%/Downloads'\n\n"
 
         "SHELL COMMAND TRANSLATIONS — never use the left column, always use the right:\n"
         "  mkdir        → create folder '<name>' in '<path>'\n"
@@ -307,6 +317,8 @@ def build_system_prompt(
         "  Paths  : single quotes + forward slashes  →  cd 'C:/Users/Name'\n"
         "  Chain  : comma only                       →  cmd1, cmd2, cmd3\n"
         "  Folder : create folder 'x' in 'y'         (never mkdir)\n"
+        "  Macros : macro add name = cmd1, cmd2       (= sign is REQUIRED)\n"
+        "  Aliases: alias add name = cmd              (= sign is REQUIRED)\n"
         "  Shell commands (mkdir, &&, rm, dir) are forbidden — use CMC equivalents above.\n"
     )
     return prefix + manual + suffix
@@ -802,6 +814,7 @@ def _call_claude_code(messages: List[Dict[str, str]]) -> str:
                 help_args,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=10,
             )
             return (help_result.stdout or help_result.stderr or "").lower()
@@ -901,6 +914,7 @@ def _call_claude_code(messages: List[Dict[str, str]]) -> str:
             run_args,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=120,
         )
     finally:

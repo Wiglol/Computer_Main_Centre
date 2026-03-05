@@ -75,6 +75,7 @@ def _docker_run(args: List[str], cwd=None) -> Tuple[int, str]:
             ["docker"] + args,
             cwd=str(cwd) if cwd else None,
             text=True,
+            encoding="utf-8",
             capture_output=True,
         )
         out = (r.stdout or "").strip()
@@ -91,6 +92,7 @@ def _docker_run_live(args: List[str], cwd=None) -> None:
             ["docker"] + args,
             cwd=str(cwd) if cwd else None,
             text=True,
+            encoding="utf-8",
         )
         proc.wait()
     except KeyboardInterrupt:
@@ -794,7 +796,7 @@ def handle_docker_commands(raw: str, low: str, cwd, p: PFunc) -> bool:
             return True
         try:
             result = subprocess.run(
-                ["netstat", "-ano"], capture_output=True, text=True, timeout=5
+                ["netstat", "-ano"], capture_output=True, text=True, encoding="utf-8", timeout=5
             )
             listening_text = result.stdout
         except Exception:

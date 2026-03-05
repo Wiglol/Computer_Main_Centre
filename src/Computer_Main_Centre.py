@@ -295,7 +295,7 @@ def detect_java_version() -> str:
     """Detects Java version from java -version, registry, or JAVA_HOME."""
     # Try java -version
     try:
-        out = subprocess.check_output(["java", "-version"], stderr=subprocess.STDOUT, text=True, shell=True)
+        out = subprocess.check_output(["java", "-version"], stderr=subprocess.STDOUT, text=True, encoding="utf-8", shell=True)
         m = re.search(r'version\s+"([^"]+)"', out)
         if not m:
             m = re.search(r"(\d+)", out)
@@ -309,7 +309,7 @@ def detect_java_version() -> str:
 
     # Try registry
     try:
-        reg_out = subprocess.check_output('reg query "HKCU\\Environment" /v JAVA_HOME', shell=True, text=True, stderr=subprocess.DEVNULL)
+        reg_out = subprocess.check_output('reg query "HKCU\\Environment" /v JAVA_HOME', shell=True, text=True, encoding="utf-8", stderr=subprocess.DEVNULL)
         m2 = re.search(r"JAVA_HOME\s+REG_SZ\s+(.+)", reg_out)
         if m2:
             java_home = m2.group(1).strip()
@@ -385,12 +385,11 @@ try:
 
     _mod_pathindex = runpy.run_path(str(PATH_INDEX_LOCAL))
     _qpaths  = _mod_pathindex.get("query_paths")
-    _qcount  = _mod_pathindex.get("count_paths")
     _qbuild  = _mod_pathindex.get("rebuild_index")
     _DB_DEFAULT = _mod_pathindex.get("DEFAULT_DB")
 except Exception as e:
     print(f"[WARN] Path-index module not loaded: {e}")
-    _qpaths = _qcount = _qbuild = _DB_DEFAULT = None
+    _qpaths = _qbuild = _DB_DEFAULT = None
 
 
 
@@ -1118,7 +1117,7 @@ def op_sysinfo(save_path=None):
         # GPU via wmic
         try:
             gpu_out = subprocess.check_output(
-                "wmic path win32_VideoController get name", shell=True, text=True
+                "wmic path win32_VideoController get name", shell=True, text=True, encoding="utf-8"
             )
             gpus = [g.strip() for g in gpu_out.splitlines() if g.strip() and "Name" not in g]
             info["GPU"] = ", ".join(gpus) if gpus else "Unknown"
@@ -1128,7 +1127,7 @@ def op_sysinfo(save_path=None):
         try:
             psu_out = subprocess.check_output(
                 'powershell "Get-WmiObject Win32_PowerSupply | Select-Object Name,Manufacturer"',
-                shell=True, text=True
+                shell=True, text=True, encoding="utf-8"
             )
             psu_lines = [l.strip() for l in psu_out.splitlines() if l.strip()]
             info["PSU"] = "; ".join(psu_lines[2:]) if len(psu_lines) > 2 else "Unknown / No telemetry"
@@ -1594,7 +1593,7 @@ def op_web_setup():
                     p("[yellow]DRY-RUN would generate requirements.txt[/yellow]")
                 else:
                     p("→ Generating requirements.txt from current environment ...")
-                    res = subprocess.run([sys.executable, "-m", "pip", "freeze"], capture_output=True, text=True)
+                    res = subprocess.run([sys.executable, "-m", "pip", "freeze"], capture_output=True, text=True, encoding="utf-8")
                     if res.returncode != 0:
                         p(f"[red]❌ pip freeze failed:[/red] {res.stderr.strip()}")
                     else:
@@ -1968,7 +1967,7 @@ def op_project_setup():
                     p("→ Generating requirements.txt from current environment ...")
                     import subprocess as _sp
                     result = _sp.run([sys.executable, "-m", "pip", "freeze"],
-                                     capture_output=True, text=True)
+                                     capture_output=True, text=True, encoding="utf-8")
                     if result.returncode != 0:
                         p(f"[red]❌ pip freeze failed:[/red] {result.stderr.strip()}")
                     else:
@@ -2679,7 +2678,7 @@ def _get_ollama_model_names() -> list:
                     break
         if not ollama_cmd:
             return []
-        out = subprocess.check_output([ollama_cmd, "list"], stderr=subprocess.STDOUT, text=True)
+        out = subprocess.check_output([ollama_cmd, "list"], stderr=subprocess.STDOUT, text=True, encoding="utf-8")
         names = []
         for line in out.splitlines():
             line = line.strip()
@@ -2740,7 +2739,7 @@ def _pick_effort_for_backend(p, backend: str, has_msvcrt: bool, rescape) -> str 
                 args = ["cmd.exe", "/c", cc, "--help"]
             else:
                 args = [cc, "--help"]
-            help_out = subprocess.check_output(args, stderr=subprocess.STDOUT, text=True, timeout=8).lower()
+            help_out = subprocess.check_output(args, stderr=subprocess.STDOUT, text=True, encoding="utf-8", timeout=8).lower()
             if "--effort" not in help_out:
                 return ""
         except Exception:
@@ -2845,7 +2844,7 @@ def _print_ai_model_list(p) -> None:
         cc = shutil.which("claude") or shutil.which("claude.cmd") or shutil.which("claude.exe")
         if cc:
             args = ["cmd.exe", "/c", cc, "--help"] if cc.lower().endswith((".cmd", ".bat")) else [cc, "--help"]
-            cc_help = subprocess.check_output(args, stderr=subprocess.STDOUT, text=True, timeout=8).lower()
+            cc_help = subprocess.check_output(args, stderr=subprocess.STDOUT, text=True, encoding="utf-8", timeout=8).lower()
             cc_effort_supported = ("--effort" in cc_help)
     except Exception:
         cc_effort_supported = False
@@ -3215,6 +3214,718 @@ def op_kill_port(port: int, p) -> None:
         p(f"[yellow]Nothing listening on port {port}.[/yellow]")
 
 
+# ---------- Network toolkit ----------
+
+def op_ping(host: str, p) -> None:
+    """Ping a host with 4 packets."""
+    import subprocess
+    p(f"[cyan]Pinging {host} ...[/cyan]")
+    try:
+        result = subprocess.run(
+            ["ping", "-n", "4", host],
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
+        )
+        output = (result.stdout or "").strip()
+        if output:
+            p(output)
+        if result.returncode != 0:
+            p(f"[red]Ping failed (exit code {result.returncode}).[/red]")
+    except subprocess.TimeoutExpired:
+        p("[red]Ping timed out after 30 seconds.[/red]")
+    except Exception as e:
+        p(f"[red]Ping error:[/red] {e}")
+
+
+def op_ip(p) -> None:
+    """Show local IP addresses."""
+    import socket
+    try:
+        hostname = socket.gethostname()
+        p(f"[bold]Hostname:[/bold] {hostname}")
+        # Get all IPs
+        addrs = socket.getaddrinfo(hostname, None, socket.AF_INET)
+        seen = set()
+        for addr in addrs:
+            ip = addr[4][0]
+            if ip not in seen:
+                seen.add(ip)
+                p(f"  Local IPv4: [cyan]{ip}[/cyan]")
+        # Try to get the primary outbound IP
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            primary = s.getsockname()[0]
+            s.close()
+            p(f"  Primary IP: [bold cyan]{primary}[/bold cyan]")
+        except Exception:
+            pass
+        # Try to get public IP
+        try:
+            if HAVE_REQUESTS:
+                resp = requests.get("https://api.ipify.org", timeout=5)
+                if resp.status_code == 200:
+                    p(f"  Public IP:  [bold green]{resp.text.strip()}[/bold green]")
+        except Exception:
+            pass
+    except Exception as e:
+        p(f"[red]IP lookup error:[/red] {e}")
+
+
+def op_dns(domain: str, p) -> None:
+    """DNS lookup for a domain."""
+    import socket
+    p(f"[cyan]DNS lookup for {domain} ...[/cyan]")
+    try:
+        results = socket.getaddrinfo(domain, None)
+        seen = set()
+        for r in results:
+            family = "IPv4" if r[0] == socket.AF_INET else "IPv6"
+            ip = r[4][0]
+            key = (family, ip)
+            if key not in seen:
+                seen.add(key)
+                p(f"  {family}: [cyan]{ip}[/cyan]")
+        if not seen:
+            p("[yellow]No DNS records found.[/yellow]")
+    except socket.gaierror as e:
+        p(f"[red]DNS lookup failed:[/red] {e}")
+    except Exception as e:
+        p(f"[red]DNS error:[/red] {e}")
+
+
+def op_traceroute(host: str, p) -> None:
+    """Trace network route to a host (Windows: tracert)."""
+    import subprocess
+    p(f"[cyan]Tracing route to {host} (this may take a while) ...[/cyan]")
+    try:
+        proc = subprocess.Popen(
+            ["tracert", "-d", "-w", "2000", host],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding="utf-8",
+        )
+        for line in proc.stdout:
+            line = line.rstrip()
+            if line:
+                p(line)
+        proc.wait(timeout=120)
+    except Exception as e:
+        p(f"[red]Traceroute error:[/red] {e}")
+
+
+def op_netcheck(p) -> None:
+    """Test internet connectivity by reaching well-known hosts."""
+    import socket
+    targets = [
+        ("Google DNS",    "8.8.8.8",           53),
+        ("Cloudflare",    "1.1.1.1",           53),
+        ("Google",        "www.google.com",    443),
+        ("GitHub",        "github.com",        443),
+    ]
+    p("[cyan]Checking internet connectivity ...[/cyan]")
+    any_ok = False
+    for name, host, port in targets:
+        try:
+            s = socket.create_connection((host, port), timeout=5)
+            s.close()
+            p(f"  [green]✔[/green] {name} ({host}:{port}) — reachable")
+            any_ok = True
+        except Exception:
+            p(f"  [red]✘[/red] {name} ({host}:{port}) — unreachable")
+    if any_ok:
+        p("[green]Internet connection is working.[/green]")
+    else:
+        p("[red]No internet connection detected.[/red]")
+
+
+def op_wifi(p) -> None:
+    """Show current WiFi connection info (Windows)."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["netsh", "wlan", "show", "interfaces"],
+            capture_output=True, text=True, encoding="utf-8", timeout=10,
+        )
+        output = (result.stdout or "").strip()
+        if not output or "no wireless" in output.lower():
+            p("[yellow]No WiFi adapter found or WiFi is disabled.[/yellow]")
+            return
+        # Parse key fields
+        fields = {}
+        for line in output.splitlines():
+            if ":" in line:
+                key, _, val = line.partition(":")
+                fields[key.strip().lower()] = val.strip()
+        ssid = fields.get("ssid", "Unknown")
+        signal = fields.get("signal", "Unknown")
+        state = fields.get("state", "Unknown")
+        channel = fields.get("channel", "—")
+        band = fields.get("radio type", "—")
+        auth = fields.get("authentication", "—")
+        speed_rx = fields.get("receive rate (mbps)", "—")
+        speed_tx = fields.get("transmit rate (mbps)", "—")
+        p(f"[bold]WiFi Status:[/bold] {state}")
+        p(f"  SSID:     [cyan]{ssid}[/cyan]")
+        p(f"  Signal:   [cyan]{signal}[/cyan]")
+        p(f"  Channel:  {channel}  |  Band: {band}")
+        p(f"  Speed:    ↓{speed_rx} Mbps  ↑{speed_tx} Mbps")
+        p(f"  Auth:     {auth}")
+    except Exception as e:
+        p(f"[red]WiFi info error:[/red] {e}")
+
+
+def op_mobile(p) -> None:
+    """Show mobile broadband (cellular) connection info (Windows)."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["netsh", "mbn", "show", "interfaces"],
+            capture_output=True, text=True, encoding="utf-8", timeout=10,
+        )
+        output = (result.stdout or "").strip()
+        if not output or "is not running" in output.lower() or "not found" in output.lower():
+            p("[yellow]No mobile broadband adapter found or service not running.[/yellow]")
+            return
+        # Parse key fields
+        fields = {}
+        for line in output.splitlines():
+            if ":" in line:
+                key, _, val = line.partition(":")
+                fields[key.strip().lower()] = val.strip()
+        provider = fields.get("home provider", fields.get("provider name", "Unknown"))
+        state = fields.get("state", "Unknown")
+        signal = fields.get("signal", fields.get("signal strength", "Unknown"))
+        dev_type = fields.get("device type", "—")
+        interface = fields.get("name", "—")
+        p(f"[bold]Mobile Broadband Status:[/bold] {state}")
+        p(f"  Interface:  [cyan]{interface}[/cyan]")
+        p(f"  Provider:   [cyan]{provider}[/cyan]")
+        p(f"  Signal:     [cyan]{signal}[/cyan]")
+        p(f"  Type:       {dev_type}")
+    except FileNotFoundError:
+        p("[yellow]Mobile broadband tools not available on this system.[/yellow]")
+    except Exception as e:
+        p(f"[red]Mobile data info error:[/red] {e}")
+
+
+def op_speedtest(p) -> None:
+    """Run a basic download speed test."""
+    import time
+    try:
+        import urllib.request
+        url = "http://speedtest.tele2.net/1MB.zip"
+        p("[cyan]Running speed test (downloading 1 MB test file) ...[/cyan]")
+        start = time.time()
+        req = urllib.request.Request(url, headers={"User-Agent": "CMC-Speedtest/1.0"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = resp.read()
+        elapsed = time.time() - start
+        size_mb = len(data) / (1024 * 1024)
+        speed_mbps = (size_mb * 8) / elapsed
+        p(f"  Downloaded: [cyan]{size_mb:.2f} MB[/cyan] in [cyan]{elapsed:.2f}s[/cyan]")
+        p(f"  Speed:      [bold green]{speed_mbps:.1f} Mbps[/bold green]")
+        if speed_mbps < 5:
+            p("[yellow]  (Slow connection)[/yellow]")
+        elif speed_mbps < 25:
+            p("[green]  (Decent connection)[/green]")
+        elif speed_mbps < 100:
+            p("[green]  (Fast connection)[/green]")
+        else:
+            p("[bold green]  (Very fast connection)[/bold green]")
+    except Exception as e:
+        p(f"[red]Speed test failed:[/red] {e}")
+
+
+def op_flush_dns(p) -> None:
+    """Flush the DNS resolver cache."""
+    import subprocess
+    p("[cyan]Flushing DNS cache ...[/cyan]")
+    try:
+        result = subprocess.run(
+            ["ipconfig", "/flushdns"],
+            capture_output=True, text=True, encoding="utf-8", timeout=10,
+        )
+        output = (result.stdout or "").strip()
+        if output:
+            p(f"[green]{output}[/green]")
+        else:
+            p("[green]DNS cache flushed.[/green]")
+    except Exception as e:
+        p(f"[red]Failed to flush DNS:[/red] {e}")
+
+
+def op_net_status(p) -> None:
+    """Show network adapter status."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["ipconfig", "/all"],
+            capture_output=True, text=True, encoding="utf-8", timeout=10,
+        )
+        output = (result.stdout or "").strip()
+        if not output:
+            p("[yellow]No network info available.[/yellow]")
+            return
+        # Parse adapters
+        adapters = []
+        current = None
+        for line in output.splitlines():
+            if line and not line.startswith(" ") and line.endswith(":"):
+                if current:
+                    adapters.append(current)
+                current = {"name": line.rstrip(":"), "details": {}}
+            elif current and ":" in line:
+                key, _, val = line.strip().partition(":")
+                key = key.strip(" .")
+                val = val.strip()
+                if val:
+                    current["details"][key.lower()] = val
+        if current:
+            adapters.append(current)
+        for a in adapters:
+            d = a["details"]
+            ipv4 = d.get("ipv4 address", d.get("autoconfiguration ipv4 address", ""))
+            gateway = d.get("default gateway", "")
+            if not ipv4 and not gateway:
+                continue
+            status = d.get("media state", "Connected")
+            p(f"\n[bold]{a['name']}[/bold]  ({status})")
+            if ipv4:
+                p(f"  IPv4:    [cyan]{ipv4}[/cyan]")
+            subnet = d.get("subnet mask", "")
+            if subnet:
+                p(f"  Subnet:  {subnet}")
+            if gateway:
+                p(f"  Gateway: [cyan]{gateway}[/cyan]")
+            dns_servers = d.get("dns servers", "")
+            if dns_servers:
+                p(f"  DNS:     {dns_servers}")
+            mac = d.get("physical address", "")
+            if mac:
+                p(f"  MAC:     {mac}")
+    except Exception as e:
+        p(f"[red]Network status error:[/red] {e}")
+
+
+def op_headers(url: str, p) -> None:
+    """Show HTTP response headers for a URL."""
+    if not url.startswith("http"):
+        url = "https://" + url
+    p(f"[cyan]Fetching headers for {url} ...[/cyan]")
+    try:
+        if HAVE_REQUESTS:
+            resp = requests.head(url, timeout=10, allow_redirects=True,
+                                 verify=STATE.get("ssl_verify", True))
+            p(f"  Status: [bold]{resp.status_code} {resp.reason}[/bold]")
+            p(f"  URL:    {resp.url}")
+            for k, v in resp.headers.items():
+                p(f"  {k}: {v}")
+        else:
+            from urllib.request import Request, urlopen
+            req = Request(url, method="HEAD")
+            resp = urlopen(req, timeout=10)
+            p(f"  Status: [bold]{resp.status}[/bold]")
+            for k, v in resp.getheaders():
+                p(f"  {k}: {v}")
+    except Exception as e:
+        p(f"[red]Headers error:[/red] {e}")
+
+
+# ── Media / FFmpeg helpers ──────────────────────────────────────
+
+_FFMPEG_PATH: str | None = None   # cached path to ffmpeg.exe
+_FFPROBE_PATH: str | None = None  # cached path to ffprobe.exe
+
+
+def _find_ffmpeg() -> str | None:
+    """Find ffmpeg binary — checks PATH first, then common install locations."""
+    global _FFMPEG_PATH, _FFPROBE_PATH
+    if _FFMPEG_PATH:
+        return _FFMPEG_PATH
+    import subprocess as _sp, glob as _gl
+    # 1) Try PATH directly
+    try:
+        r = _sp.run(["ffmpeg", "-version"], capture_output=True, text=True,
+                     encoding="utf-8", timeout=5)
+        if r.returncode == 0:
+            _FFMPEG_PATH = "ffmpeg"
+            _FFPROBE_PATH = "ffprobe"
+            return _FFMPEG_PATH
+    except FileNotFoundError:
+        pass
+    # 2) Search common locations
+    home = os.path.expanduser("~")
+    search_patterns = [
+        os.path.join(home, "AppData", "Local", "Temp", "WinGet", "**", "bin", "ffmpeg.exe"),
+        os.path.join(home, "AppData", "Local", "Microsoft", "WinGet", "**", "ffmpeg.exe"),
+        os.path.join(home, "AppData", "Local", "Programs", "**", "ffmpeg.exe"),
+        "C:/ffmpeg/**/ffmpeg.exe",
+        "C:/Program Files/ffmpeg/**/ffmpeg.exe",
+        "C:/Program Files (x86)/ffmpeg/**/ffmpeg.exe",
+        "C:/tools/**/ffmpeg.exe",
+        "C:/ProgramData/chocolatey/bin/ffmpeg.exe",
+    ]
+    for pattern in search_patterns:
+        hits = _gl.glob(pattern, recursive=True)
+        if hits:
+            ff = hits[0]
+            _FFMPEG_PATH = ff
+            probe = os.path.join(os.path.dirname(ff), "ffprobe.exe")
+            _FFPROBE_PATH = probe if os.path.isfile(probe) else "ffprobe"
+            return _FFMPEG_PATH
+    return None
+
+
+def _check_ffmpeg(p) -> bool:
+    """Check if ffmpeg is available, print help if not."""
+    if _find_ffmpeg():
+        return True
+    p("[red]FFmpeg is not installed or not found.[/red]")
+    p("  Install: [cyan]winget install Gyan.FFmpeg[/cyan]")
+    p("  Or download from: [cyan]https://ffmpeg.org/download.html[/cyan]")
+    p("  [dim]After installing, restart CMC so it can find the new path.[/dim]")
+    return False
+
+
+def _ff_cmd() -> str:
+    """Return the path to ffmpeg (cached)."""
+    return _FFMPEG_PATH or "ffmpeg"
+
+
+def _ffprobe_cmd() -> str:
+    """Return the path to ffprobe (cached)."""
+    return _FFPROBE_PATH or "ffprobe"
+
+
+def _ffprobe_json(path: str):
+    """Run ffprobe and return parsed JSON, or None on failure."""
+    import subprocess as _sp, json
+    try:
+        r = _sp.run(
+            [_ffprobe_cmd(), "-v", "quiet", "-print_format", "json",
+             "-show_format", "-show_streams", path],
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
+        )
+        return json.loads(r.stdout) if r.returncode == 0 else None
+    except Exception:
+        return None
+
+
+def op_media_info(src: str, p) -> None:
+    """Show media file information (duration, resolution, codec, bitrate)."""
+    if not _check_ffmpeg(p):
+        return
+    src = os.path.abspath(src)
+    if not os.path.isfile(src):
+        p(f"[red]File not found:[/red] {src}")
+        return
+    info = _ffprobe_json(src)
+    if not info:
+        p("[red]Could not read media info.[/red]")
+        return
+    fmt = info.get("format", {})
+    p(f"[bold]Media Info:[/bold] {os.path.basename(src)}")
+    dur = fmt.get("duration")
+    if dur:
+        secs = float(dur)
+        mins, s = divmod(int(secs), 60)
+        hrs, mins = divmod(mins, 60)
+        ts = f"{hrs}:{mins:02d}:{s:02d}" if hrs else f"{mins}:{s:02d}"
+        p(f"  Duration:   [cyan]{ts}[/cyan]")
+    br = fmt.get("bit_rate")
+    if br:
+        p(f"  Bitrate:    [cyan]{int(br)//1000} kbps[/cyan]")
+    size = fmt.get("size")
+    if size:
+        mb = int(size) / (1024 * 1024)
+        p(f"  Size:       [cyan]{mb:.1f} MB[/cyan]")
+    for st in info.get("streams", []):
+        ct = st.get("codec_type", "")
+        codec = st.get("codec_name", "?")
+        if ct == "video":
+            w, h = st.get("width", "?"), st.get("height", "?")
+            fps_r = st.get("r_frame_rate", "")
+            fps = ""
+            if fps_r and "/" in fps_r:
+                num, den = fps_r.split("/")
+                try:
+                    fps = f" @ {int(num)//int(den)} fps"
+                except Exception:
+                    pass
+            p(f"  Video:      [cyan]{codec}  {w}x{h}{fps}[/cyan]")
+        elif ct == "audio":
+            sr = st.get("sample_rate", "?")
+            ch = st.get("channels", "?")
+            p(f"  Audio:      [cyan]{codec}  {sr} Hz  {ch}ch[/cyan]")
+
+
+def op_convert(src: str, to_fmt: str, p) -> None:
+    """Convert media file to another format."""
+    if not _check_ffmpeg(p):
+        return
+    import subprocess as _sp
+    src = os.path.abspath(src)
+    if not os.path.isfile(src):
+        p(f"[red]File not found:[/red] {src}")
+        return
+    to_fmt = to_fmt.lstrip(".")
+    base = os.path.splitext(src)[0]
+    dst = f"{base}.{to_fmt}"
+    if os.path.abspath(dst) == os.path.abspath(src):
+        p("[yellow]Source and destination are the same file.[/yellow]")
+        return
+    p(f"[cyan]Converting → {os.path.basename(dst)} ...[/cyan]")
+    try:
+        r = _sp.run([_ff_cmd(), "-i", src, "-y", dst],
+                     capture_output=True, text=True, encoding="utf-8", timeout=600)
+        if r.returncode == 0 and os.path.isfile(dst):
+            mb = os.path.getsize(dst) / (1024 * 1024)
+            p(f"[green]Done:[/green] {dst}  ({mb:.1f} MB)")
+        else:
+            err = (r.stderr or "").strip().splitlines()
+            p(f"[red]Conversion failed.[/red]  {err[-1] if err else ''}")
+    except Exception as e:
+        p(f"[red]Convert error:[/red] {e}")
+
+
+def op_compress(src: str, p) -> None:
+    """Compress a video/audio file to reduce size."""
+    if not _check_ffmpeg(p):
+        return
+    import subprocess as _sp
+    src = os.path.abspath(src)
+    if not os.path.isfile(src):
+        p(f"[red]File not found:[/red] {src}")
+        return
+    base, ext = os.path.splitext(src)
+    dst = f"{base}_compressed{ext}"
+    orig_mb = os.path.getsize(src) / (1024 * 1024)
+    p(f"[cyan]Compressing {os.path.basename(src)} ({orig_mb:.1f} MB) ...[/cyan]")
+    # Use CRF 28 for video, lower bitrate for audio-only
+    ext_low = ext.lower()
+    if ext_low in (".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".wma"):
+        cmd = [_ff_cmd(), "-i", src, "-b:a", "96k", "-y", dst]
+    else:
+        cmd = [_ff_cmd(), "-i", src, "-crf", "28", "-preset", "fast", "-y", dst]
+    try:
+        r = _sp.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=600)
+        if r.returncode == 0 and os.path.isfile(dst):
+            new_mb = os.path.getsize(dst) / (1024 * 1024)
+            saved = ((orig_mb - new_mb) / orig_mb) * 100 if orig_mb > 0 else 0
+            p(f"[green]Done:[/green] {dst}")
+            p(f"  {orig_mb:.1f} MB → {new_mb:.1f} MB  ([bold green]{saved:.0f}% smaller[/bold green])")
+        else:
+            err = (r.stderr or "").strip().splitlines()
+            p(f"[red]Compression failed.[/red]  {err[-1] if err else ''}")
+    except Exception as e:
+        p(f"[red]Compress error:[/red] {e}")
+
+
+def op_trim(src: str, start: str, end: str, p) -> None:
+    """Trim/cut a section from a media file."""
+    if not _check_ffmpeg(p):
+        return
+    import subprocess as _sp
+    src = os.path.abspath(src)
+    if not os.path.isfile(src):
+        p(f"[red]File not found:[/red] {src}")
+        return
+    base, ext = os.path.splitext(src)
+    dst = f"{base}_trimmed{ext}"
+    p(f"[cyan]Trimming {os.path.basename(src)} ({start} → {end}) ...[/cyan]")
+    try:
+        r = _sp.run([_ff_cmd(), "-i", src, "-ss", start, "-to", end, "-c", "copy", "-y", dst],
+                     capture_output=True, text=True, encoding="utf-8", timeout=600)
+        if r.returncode == 0 and os.path.isfile(dst):
+            mb = os.path.getsize(dst) / (1024 * 1024)
+            p(f"[green]Done:[/green] {dst}  ({mb:.1f} MB)")
+        else:
+            err = (r.stderr or "").strip().splitlines()
+            p(f"[red]Trim failed.[/red]  {err[-1] if err else ''}")
+    except Exception as e:
+        p(f"[red]Trim error:[/red] {e}")
+
+
+def op_resize(src: str, dims: str, p) -> None:
+    """Resize a video or image."""
+    if not _check_ffmpeg(p):
+        return
+    import subprocess as _sp
+    src = os.path.abspath(src)
+    if not os.path.isfile(src):
+        p(f"[red]File not found:[/red] {src}")
+        return
+    # Parse WxH
+    parts = re.split(r"[xX×]", dims)
+    if len(parts) != 2:
+        p("[red]Format: resize 'file' <width>x<height>  (e.g. 1280x720)[/red]")
+        return
+    w, h = parts[0].strip(), parts[1].strip()
+    base, ext = os.path.splitext(src)
+    dst = f"{base}_{w}x{h}{ext}"
+    p(f"[cyan]Resizing → {w}x{h} ...[/cyan]")
+    try:
+        r = _sp.run([_ff_cmd(), "-i", src, "-vf", f"scale={w}:{h}", "-y", dst],
+                     capture_output=True, text=True, encoding="utf-8", timeout=600)
+        if r.returncode == 0 and os.path.isfile(dst):
+            mb = os.path.getsize(dst) / (1024 * 1024)
+            p(f"[green]Done:[/green] {dst}  ({mb:.1f} MB)")
+        else:
+            err = (r.stderr or "").strip().splitlines()
+            p(f"[red]Resize failed.[/red]  {err[-1] if err else ''}")
+    except Exception as e:
+        p(f"[red]Resize error:[/red] {e}")
+
+
+def op_rotate(src: str, degrees: str, p) -> None:
+    """Rotate a video by 90, 180, or 270 degrees."""
+    if not _check_ffmpeg(p):
+        return
+    import subprocess as _sp
+    src = os.path.abspath(src)
+    if not os.path.isfile(src):
+        p(f"[red]File not found:[/red] {src}")
+        return
+    tp_map = {"90": "transpose=1", "180": "transpose=1,transpose=1",
+              "270": "transpose=2"}
+    vf = tp_map.get(degrees.strip())
+    if not vf:
+        p("[red]Use: rotate 'file' 90 | 180 | 270[/red]")
+        return
+    base, ext = os.path.splitext(src)
+    dst = f"{base}_rotated{ext}"
+    p(f"[cyan]Rotating {degrees}° ...[/cyan]")
+    try:
+        r = _sp.run([_ff_cmd(), "-i", src, "-vf", vf, "-y", dst],
+                     capture_output=True, text=True, encoding="utf-8", timeout=600)
+        if r.returncode == 0 and os.path.isfile(dst):
+            p(f"[green]Done:[/green] {dst}")
+        else:
+            err = (r.stderr or "").strip().splitlines()
+            p(f"[red]Rotate failed.[/red]  {err[-1] if err else ''}")
+    except Exception as e:
+        p(f"[red]Rotate error:[/red] {e}")
+
+
+def op_volume(src: str, level: str, p) -> None:
+    """Adjust audio volume (e.g. 50%, 200%, 0.5, 2.0)."""
+    if not _check_ffmpeg(p):
+        return
+    import subprocess as _sp
+    src = os.path.abspath(src)
+    if not os.path.isfile(src):
+        p(f"[red]File not found:[/red] {src}")
+        return
+    # Parse level: "200%" → "2.0", "50%" → "0.5", or pass through
+    level = level.strip()
+    if level.endswith("%"):
+        try:
+            vol = str(float(level.rstrip("%")) / 100)
+        except ValueError:
+            p("[red]Invalid volume level. Use: 50%, 200%, 0.5, 2.0[/red]")
+            return
+    else:
+        vol = level
+    base, ext = os.path.splitext(src)
+    dst = f"{base}_vol{ext}"
+    p(f"[cyan]Adjusting volume to {level} ...[/cyan]")
+    try:
+        r = _sp.run([_ff_cmd(), "-i", src, "-filter:a", f"volume={vol}", "-y", dst],
+                     capture_output=True, text=True, encoding="utf-8", timeout=600)
+        if r.returncode == 0 and os.path.isfile(dst):
+            p(f"[green]Done:[/green] {dst}")
+        else:
+            err = (r.stderr or "").strip().splitlines()
+            p(f"[red]Volume adjust failed.[/red]  {err[-1] if err else ''}")
+    except Exception as e:
+        p(f"[red]Volume error:[/red] {e}")
+
+
+def op_extract_audio(src: str, p) -> None:
+    """Extract audio track from a video file."""
+    if not _check_ffmpeg(p):
+        return
+    import subprocess as _sp
+    src = os.path.abspath(src)
+    if not os.path.isfile(src):
+        p(f"[red]File not found:[/red] {src}")
+        return
+    base = os.path.splitext(src)[0]
+    dst = f"{base}_audio.mp3"
+    p(f"[cyan]Extracting audio → {os.path.basename(dst)} ...[/cyan]")
+    try:
+        r = _sp.run([_ff_cmd(), "-i", src, "-vn", "-acodec", "libmp3lame",
+                      "-q:a", "2", "-y", dst],
+                     capture_output=True, text=True, encoding="utf-8", timeout=600)
+        if r.returncode == 0 and os.path.isfile(dst):
+            mb = os.path.getsize(dst) / (1024 * 1024)
+            p(f"[green]Done:[/green] {dst}  ({mb:.1f} MB)")
+        else:
+            err = (r.stderr or "").strip().splitlines()
+            p(f"[red]Extract audio failed.[/red]  {err[-1] if err else ''}")
+    except Exception as e:
+        p(f"[red]Extract error:[/red] {e}")
+
+
+def op_merge(files: list, p) -> None:
+    """Merge/concatenate media files."""
+    if not _check_ffmpeg(p):
+        return
+    import subprocess as _sp, tempfile
+    abs_files = []
+    for f in files:
+        af = os.path.abspath(f)
+        if not os.path.isfile(af):
+            p(f"[red]File not found:[/red] {af}")
+            return
+        abs_files.append(af)
+    base, ext = os.path.splitext(abs_files[0])
+    dst = f"{base}_merged{ext}"
+    p(f"[cyan]Merging {len(abs_files)} files ...[/cyan]")
+    # Create concat list file
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt",
+                                          delete=False, encoding="utf-8") as tmp:
+            for af in abs_files:
+                tmp.write(f"file '{af}'\n")
+            list_path = tmp.name
+        r = _sp.run([_ff_cmd(), "-f", "concat", "-safe", "0", "-i", list_path,
+                      "-c", "copy", "-y", dst],
+                     capture_output=True, text=True, encoding="utf-8", timeout=600)
+        os.unlink(list_path)
+        if r.returncode == 0 and os.path.isfile(dst):
+            mb = os.path.getsize(dst) / (1024 * 1024)
+            p(f"[green]Done:[/green] {dst}  ({mb:.1f} MB)")
+        else:
+            err = (r.stderr or "").strip().splitlines()
+            p(f"[red]Merge failed.[/red]  {err[-1] if err else ''}")
+    except Exception as e:
+        p(f"[red]Merge error:[/red] {e}")
+
+
+def op_thumbnail(src: str, time_pos: str, p) -> None:
+    """Extract a single frame from a video as an image."""
+    if not _check_ffmpeg(p):
+        return
+    import subprocess as _sp
+    src = os.path.abspath(src)
+    if not os.path.isfile(src):
+        p(f"[red]File not found:[/red] {src}")
+        return
+    base = os.path.splitext(src)[0]
+    dst = f"{base}_thumb.png"
+    p(f"[cyan]Extracting frame at {time_pos} ...[/cyan]")
+    try:
+        r = _sp.run([_ff_cmd(), "-i", src, "-ss", time_pos, "-frames:v", "1", "-y", dst],
+                     capture_output=True, text=True, encoding="utf-8", timeout=60)
+        if r.returncode == 0 and os.path.isfile(dst):
+            p(f"[green]Done:[/green] {dst}")
+        else:
+            err = (r.stderr or "").strip().splitlines()
+            p(f"[red]Thumbnail failed.[/red]  {err[-1] if err else ''}")
+    except Exception as e:
+        p(f"[red]Thumbnail error:[/red] {e}")
+
+
 # ---------- Suggestions for partial commands ----------
 COMMAND_HINTS = [
     "pwd","cd","back","home","list","info","find","findext","recent","biggest","search",
@@ -3226,7 +3937,7 @@ COMMAND_HINTS = [
     "download","downloadlist","open url",
     "batch on","batch off","dry-run on","dry-run off","ssl on","ssl off","status","log","undo",
     "macro add <name> = <commands>","macro run <name>","macro edit <name>","macro list","macro delete <name>","macro clear","help","exit", "search web <query>",
-    "ports","kill",
+    "ports","kill","ping","ip","dns","traceroute","netcheck","wifi","flush dns","net status","headers",
     # Scaffolding & dev tools
     "setup",
     "new python","new node","new flask","new fastapi","new react","new vue","new svelte",
@@ -3626,7 +4337,7 @@ def handle_command(s: str):
             return
         try:
             import subprocess
-            result = subprocess.run(cmd_line, shell=True, text=True, capture_output=True)
+            result = subprocess.run(cmd_line, shell=True, text=True, encoding="utf-8", capture_output=True)
             if result.stdout:
                 p(result.stdout.strip())
             if result.stderr:
@@ -3937,7 +4648,7 @@ def handle_command(s: str):
             ]:
                 try:
                     out = subprocess.check_output(
-                        reg_cmd, shell=True, text=True, stderr=subprocess.DEVNULL
+                        reg_cmd, shell=True, text=True, encoding="utf-8", stderr=subprocess.DEVNULL
                     )
                     m = re.search(r"JAVA_HOME\s+REG_SZ\s+(.+)", out)
                     if m:
@@ -4354,13 +5065,104 @@ def handle_command(s: str):
     if re.match(r"^macro\s+list$", s, re.I): macro_list(); return
     if re.match(r"^macro\s+clear$", s, re.I): macro_clear(); return
 
-    # ---------- Ports ----------
+    # ---------- Network toolkit ----------
     if low == "ports":
         op_ports(p); return
     m = re.match(r"^kill\s+(\d+)$", s, re.I)
     if m:
         op_kill_port(int(m.group(1)), p); return
-    
+    m = re.match(r"^ping\s+(.+)$", s, re.I)
+    if m:
+        op_ping(m.group(1).strip().strip("'\""), p); return
+    if low == "ip":
+        op_ip(p); return
+    m = re.match(r"^dns\s+(.+)$", s, re.I)
+    if m:
+        op_dns(m.group(1).strip().strip("'\""), p); return
+    m = re.match(r"^traceroute\s+(.+)$", s, re.I)
+    if m:
+        op_traceroute(m.group(1).strip().strip("'\""), p); return
+    if low == "netcheck":
+        op_netcheck(p); return
+    if low == "wifi":
+        op_wifi(p); return
+    if low in ("mobile", "mobile data", "mobiledata"):
+        op_mobile(p); return
+    if low in ("speedtest", "speed test", "speed"):
+        op_speedtest(p); return
+    if low in ("flush dns", "flushdns"):
+        op_flush_dns(p); return
+    if low in ("net status", "netstatus"):
+        op_net_status(p); return
+    m = re.match(r"^headers\s+(.+)$", s, re.I)
+    if m:
+        op_headers(m.group(1).strip().strip("'\""), p); return
+
+    # ---------- Media / FFmpeg ----------
+    m = re.match(r"^convert\s+'([^']+)'\s+to\s+(\w+)$", s, re.I)
+    if m:
+        op_convert(m.group(1), m.group(2), p); return
+    m = re.match(r'^convert\s+"([^"]+)"\s+to\s+(\w+)$', s, re.I)
+    if m:
+        op_convert(m.group(1), m.group(2), p); return
+    m = re.match(r"^compress\s+'([^']+)'$", s, re.I)
+    if m:
+        op_compress(m.group(1), p); return
+    m = re.match(r'^compress\s+"([^"]+)"$', s, re.I)
+    if m:
+        op_compress(m.group(1), p); return
+    m = re.match(r"^trim\s+'([^']+)'\s+(\S+)\s+(\S+)$", s, re.I)
+    if m:
+        op_trim(m.group(1), m.group(2), m.group(3), p); return
+    m = re.match(r'^trim\s+"([^"]+)"\s+(\S+)\s+(\S+)$', s, re.I)
+    if m:
+        op_trim(m.group(1), m.group(2), m.group(3), p); return
+    m = re.match(r"^resize\s+'([^']+)'\s+(\S+)$", s, re.I)
+    if m:
+        op_resize(m.group(1), m.group(2), p); return
+    m = re.match(r'^resize\s+"([^"]+)"\s+(\S+)$', s, re.I)
+    if m:
+        op_resize(m.group(1), m.group(2), p); return
+    m = re.match(r"^rotate\s+'([^']+)'\s+(\d+)$", s, re.I)
+    if m:
+        op_rotate(m.group(1), m.group(2), p); return
+    m = re.match(r'^rotate\s+"([^"]+)"\s+(\d+)$', s, re.I)
+    if m:
+        op_rotate(m.group(1), m.group(2), p); return
+    m = re.match(r"^volume\s+'([^']+)'\s+(\S+)$", s, re.I)
+    if m:
+        op_volume(m.group(1), m.group(2), p); return
+    m = re.match(r'^volume\s+"([^"]+)"\s+(\S+)$', s, re.I)
+    if m:
+        op_volume(m.group(1), m.group(2), p); return
+    m = re.match(r"^extract\s+audio\s+'([^']+)'$", s, re.I)
+    if m:
+        op_extract_audio(m.group(1), p); return
+    m = re.match(r'^extract\s+audio\s+"([^"]+)"$', s, re.I)
+    if m:
+        op_extract_audio(m.group(1), p); return
+    m = re.match(r"^media\s+info\s+'([^']+)'$", s, re.I)
+    if m:
+        op_media_info(m.group(1), p); return
+    m = re.match(r'^media\s+info\s+"([^"]+)"$', s, re.I)
+    if m:
+        op_media_info(m.group(1), p); return
+    m = re.match(r"^merge\s+(.+)$", s, re.I)
+    if m:
+        files = re.findall(r"'([^']+)'", m.group(1))
+        if not files:
+            files = re.findall(r'"([^"]+)"', m.group(1))
+        if len(files) >= 2:
+            op_merge(files, p); return
+        else:
+            p("[red]Usage: merge 'file1' 'file2' [... more files][/red]"); return
+    m = re.match(r"^thumbnail\s+'([^']+)'(?:\s+(\S+))?$", s, re.I)
+    if m:
+        op_thumbnail(m.group(1), m.group(2) or "0:05", p); return
+    m = re.match(r'^thumbnail\s+"([^"]+)"(?:\s+(\S+))?$', s, re.I)
+    if m:
+        op_thumbnail(m.group(1), m.group(2) or "0:05", p); return
+
         # ---------- File Operations ----------
     m = re.match(r"^create\s+file\s+'(.+?)'\s+in\s+'(.+?)'(?:\s+with\s+text=['\"](.+?)['\"])?$", s, re.I)
     if m:
@@ -4461,16 +5263,6 @@ def handle_command(s: str):
         
 
 
-
-    # /qcount
-    if re.match(r"^/qcount$", s, re.I):
-        try:
-            from path_index_local import quick_count
-            count = quick_count()
-            p(f"📁 Indexed paths: {count}")
-        except Exception as e:
-            p(f"[red]Quick-count error:[/red] {e}")
-        return
 
     # /build [targets...]
     m = re.match(r"^/build(?:\s+(.+))?$", s, re.I)
@@ -4841,12 +5633,10 @@ Timing:
 Input:
 • sendkeys "<text>{ENTER}"
 
-Ports & processes:
-• ports                           Show all listening ports with PID and process name
-• kill <port>                     Kill whatever process is running on that port
-
 Examples:
-  kill 3000
+  run 'C:/Scripts/build.py' in 'C:/MyProject'
+  timer 300 Time to take a break!
+  sleep 5
 """
 
     sec10 = """
@@ -4966,28 +5756,75 @@ Quick start (no API key):
 
 
     sec13 = """
-[bold]12. Flags, Modes & Config[/bold]
+[bold]13. Network & Connectivity[/bold]
 -----------------------------------
 
-Modes:
-• batch on/off                     Auto-confirm prompts
-• dry-run on/off                   Preview actions without executing
-• ssl on/off                       Toggle SSL verification for downloads
+Connectivity:
+• ping <host>                      Ping a host (4 packets)
+• netcheck                        Test internet connectivity (checks multiple hosts)
+• traceroute <host>               Trace network route to a host
 
-Config system:
-• config list
-• config get <key>
-• config set <key> <value>
-• config reset
+Info:
+• ip                              Show local, primary, and public IP addresses
+• dns <domain>                    DNS lookup (IPv4 and IPv6 records)
+• wifi                            Show WiFi status, SSID, signal, speed
+• mobile                         Show mobile broadband (cellular) connection info
+• net status                      Show all network adapters and their config
+• speedtest                      Download speed test (~1 MB file)
+
+Web:
+• headers <url>                   Show HTTP response headers for a URL
+
+Ports:
+• ports                           List all listening TCP ports with PID and process name
+• kill <port>                     Kill the process running on a specific port
+
+Maintenance:
+• flush dns                       Flush the DNS resolver cache
 
 Examples:
-  dry-run on, delete 'C:/Temp/old_logs'
-  config set space.default_depth 4
-  config get ai.model
+  ping google.com
+  dns github.com
+  headers api.example.com
+  kill 3000
 """
 
     sec14 = """
-[bold]14. Docker[/bold]
+[bold]14. Media Tools (FFmpeg)[/bold]
+-----------------------------------
+
+Requires FFmpeg installed (winget install Gyan.FFmpeg)
+
+Convert:
+• convert '<file>' to <format>     Convert to any format (mp3, mp4, gif, wav, avi, mkv, flac, webm ...)
+• extract audio '<video>'          Extract audio track from video (→ .mp3)
+
+Edit:
+• trim '<file>' <start> <end>      Cut a section (e.g. trim 'v.mp4' 0:30 1:45)
+• resize '<file>' <WxH>            Resize video or image (e.g. resize 'v.mp4' 1280x720)
+• rotate '<file>' <degrees>        Rotate video (90, 180, 270)
+• volume '<file>' <level>          Adjust audio volume (e.g. 50%, 200%)
+
+Optimize:
+• compress '<file>'                Reduce file size (lower quality, smaller file)
+• merge '<file1>' '<file2>'        Concatenate media files (2 or more)
+
+Info:
+• media info '<file>'              Show duration, resolution, codec, bitrate
+• thumbnail '<video>' [time]       Extract a frame as image (default: 0:05)
+
+Examples:
+  convert 'song.wav' to mp3
+  trim 'video.mp4' 0:10 0:45
+  compress 'recording.mp4'
+  merge 'part1.mp4' 'part2.mp4'
+  resize 'clip.mp4' 1280x720
+  volume 'podcast.mp3' 150%
+  thumbnail 'movie.mp4' 1:30
+"""
+
+    sec15 = """
+[bold]15. Docker[/bold]
 -----------------------------------
 
 Containers:
@@ -5059,6 +5896,27 @@ Examples:
   docker clone myapp myapp-staging
 """
 
+    sec16 = """
+[bold]16. Flags, Modes & Config[/bold]
+-----------------------------------
+
+Modes:
+• batch on/off                     Auto-confirm prompts
+• dry-run on/off                   Preview actions without executing
+• ssl on/off                       Toggle SSL verification for downloads
+
+Config system:
+• config list
+• config get <key>
+• config set <key> <value>
+• config reset
+
+Examples:
+  dry-run on, delete 'C:/Temp/old_logs'
+  config set space.default_depth 4
+  config get ai.model
+"""
+
     # ---------- Section Map ----------
     sections = {
         "1": ("Basics & navigation", sec1),
@@ -5073,8 +5931,10 @@ Examples:
         "10": ("Web & downloads", sec10),
         "11": ("Project setup & dev tools", sec11),
         "12": ("AI models & commands", sec12),
-        "13": ("Flags & modes", sec13),
-        "14": ("Docker", sec14),
+        "13": ("Network & connectivity", sec13),
+        "14": ("Media tools (FFmpeg)", sec14),
+        "15": ("Docker", sec15),
+        "16": ("Flags & modes", sec16),
     }
 
     # ---------- Aliases ----------
@@ -5088,13 +5948,16 @@ Examples:
         "git": "7", "branch": "7", "branches": "7",
         "java": "8",
         "server": "8", "servers": "8",
-        "auto": "9", "automation": "9", "ports": "9", "port": "9", "kill": "9",
+        "auto": "9", "automation": "9",
         "web": "10", "downloads": "10",
         "project": "11", "scaffold": "11", "new": "11", "dev": "11", "env": "11", "setup": "11",
         "ai": "12", "model": "12", "models": "12", "ollama": "12",
-        "flags": "13", "mode": "13", "modes": "13",
-        "batch": "13", "ssl": "13", "dry-run": "13",
-        "docker": "14", "container": "14", "containers": "14", "compose": "14",
+        "network": "13", "net": "13", "ping": "13", "dns": "13", "wifi": "13",
+        "ports": "13", "port": "13", "kill": "13", "ip": "13", "traceroute": "13",
+        "media": "14", "ffmpeg": "14", "convert": "14", "video": "14", "audio": "14",
+        "docker": "15", "container": "15", "containers": "15", "compose": "15",
+        "flags": "16", "mode": "16", "modes": "16",
+        "batch": "16", "ssl": "16", "dry-run": "16", "config": "16",
     }
 
     # ---------- No topic: Show menu ----------
@@ -5114,8 +5977,10 @@ Type `help <number>` to open a section or use: help all
  10. Web & downloads
  11. Project setup & dev tools
  12. AI models & commands
- 13. Flags & modes
- 14. Docker
+ 13. Network & connectivity
+ 14. Media tools (FFmpeg)
+ 15. Docker
+ 16. Flags & modes
 
 """
         _panel("CMC Help – categories", menu)
@@ -5252,13 +6117,15 @@ def complete_command(text, state):
     # Macros
     "macro add", "macro run", "macro edit", "macro list", "macro delete", "macro clear",
 
-    # Ports
-    "ports", "kill",
+    # Network
+    "ports", "kill", "ping", "ip", "dns", "traceroute", "netcheck",
+    "wifi", "mobile", "speedtest", "flush dns", "net status", "headers",
+
+    # Media
+    "convert", "compress", "trim", "resize", "rotate", "volume",
+    "extract audio", "merge", "media info", "thumbnail",
 
     # Git
-    "/gitsetup", "/gitlink", "/gitupdate", "/gitpull", "/gitstatus",
-    "/gitlog", "/gitbranch", "/gitignore add", "/gitclean", "/gitdoctor",
-    "/gitfix", "/gitlfs setup",
     "git branch", "git branch list", "git branch create", "git branch switch",
     "git branch delete", "git branch merge",
 
@@ -5278,7 +6145,7 @@ def complete_command(text, state):
     "docker backup", "docker clone", "docker watch", "docker size", "docker port-check",
 
     # Path index
-    "/find", "/qcount", "/build",
+    "/find", "/build",
 
     # Java
     "java list", "java version", "java change", "java reload",
@@ -5402,8 +6269,12 @@ def build_completer():
         "macro add", "macro run", "macro edit", "macro list", "macro delete", "macro clear",
         # Aliases
         "alias add", "alias delete", "alias list",
-        # Ports
-        "ports", "kill",
+        # Network
+        "ports", "kill", "ping", "ip", "dns", "traceroute", "netcheck",
+        "wifi", "mobile", "speedtest", "flush dns", "net status", "headers",
+        # Media
+        "convert", "compress", "trim", "resize", "rotate", "volume",
+        "extract audio", "merge", "media info", "thumbnail",
         # Git
         "git upload", "git update", "git download", "git clone",
         "git link", "git status", "git log", "git doctor",
@@ -5429,7 +6300,7 @@ def build_completer():
         "docker wait", "docker errors", "docker env run",
         "docker backup", "docker clone", "docker watch", "docker size", "docker port-check",
         # Path index
-        "/find", "/qcount", "/build",
+        "/find", "/build",
         # Java
         "java list", "java version", "java change", "java reload",
         # AI

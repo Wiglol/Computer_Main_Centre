@@ -133,8 +133,8 @@ write 'notes.txt' text="hello world"
 
 ## 3.4 Copy / Move / Rename
 - `copy '<src>' to '<dst>'`
-- `move '<src>' to '<dst>'`
-- `rename '<src>' to '<dst>'` (alias for move)
+- `move '<src>' to '<dst>'`     — destination is a folder; places file inside it
+- `rename '<src>' to '<new_name>'` — renames relative to source's parent (NOT the same as move)
 
 ## 3.5 Delete
 - `delete '<path>'`
@@ -182,9 +182,6 @@ Query index:
 - `/find <query>`
   Example: `/find Atlauncher Server`
 
-Index stats:
-- `/qcount`
-
 Note: Run `/build` once per machine to create the index. Re-run after major file changes.
 
 ---
@@ -195,6 +192,10 @@ Note: Run `/build` once per machine to create the index. Re-run after major file
 
 ## 5.1 Syntax
 `macro add <name> = <cmd1>, <cmd2>, <cmd3>`
+
+**CRITICAL:** The `=` sign is REQUIRED. Without it the command fails.
+- CORRECT: `macro add deploy = batch on, git update "ship it"`
+- WRONG:   `macro add deploy batch on, git update "ship it"`
 
 Variables expanded at runtime:
 - `%DATE%`
@@ -208,6 +209,7 @@ Variables expanded at runtime:
 - `macro clear`
 
 ## 5.3 Rules
+- The `=` sign between name and commands is mandatory
 - Always obey single-quote rule
 - Commas only between commands, no semicolons
 - No trailing comma at end
@@ -224,11 +226,12 @@ macro add publish = batch on, zip '%HOME%/Project' to '%HOME%/Desktop', git upda
 # 6. ALIASES
 # ===========================
 
-- `alias add <name> = <cmd>`
+- `alias add <name> = <cmd>`    ← the `=` sign is REQUIRED
 - `alias list`
 - `alias delete <name>`
 
 Rules:
+- The `=` sign between name and command is mandatory
 - Only ONE command per alias (no commas / chaining)
 - Intended for simple shortcuts
 
@@ -277,22 +280,15 @@ Notes:
 Safety:
 - `git repo delete` is irreversible on GitHub (local untouched)
 
-## 7.2 Advanced Git control plane (slash commands)
-Use these for precise maintenance and AI workflows:
-- `/gitsetup`
-- `/gitlink <url-or-owner/repo>`
-- `/gitupdate <msg>`
-- `/gitpull`
-- `/gitstatus`
-- `/gitlog`
-- `/gitignore add <pattern>`
-- `/gitclean`
-- `/gitdoctor`
-- `/gitbranch` (branch helper if present)
-- `/gitfix` (repair helper if present)
-- `/gitlfs setup` (LFS helper if present)
+## 7.2 Branch commands
+- `git branch list`
+- `git branch create <name>`
+- `git branch switch <name>`
+- `git branch delete <name>`
+- `git branch merge <name>`
 
-**Rule:** Only use `/gitclean` if user explicitly asks to clean a repo.
+**Important:** Slash commands like `/gitsetup`, `/gitlink`, `/gitclean` etc. DO NOT EXIST.
+Always use the `git <action>` form (e.g. `git doctor`, `git link`, `git update`).
 
 ---
 
@@ -502,20 +498,72 @@ ai-model set qwen2.5:14b-instruct
 ---
 
 # ===========================
-# 13b. PORTS & PROCESSES
+# 13b. NETWORK & CONNECTIVITY
 # ===========================
 
-- `ports` — show all listening TCP ports with their PID and process name
-- `kill <port>` — kill the process running on the specified port number
+Connectivity:
+- `ping <host>` — ping a host (4 packets)
+- `netcheck` — test internet connectivity (checks Google DNS, Cloudflare, Google, GitHub)
+- `traceroute <host>` — trace network route to a host
 
-Notes:
-- Run CMC as admin for a complete list of all system ports
-- Useful for stopping dev servers or freeing up stuck ports
+Info:
+- `ip` — show local, primary, and public IP addresses
+- `dns <domain>` — DNS lookup (IPv4 and IPv6 records)
+- `wifi` — show WiFi SSID, signal strength, speed, channel
+- `mobile` — show mobile broadband (cellular) connection info
+- `net status` — show all network adapters and their configuration
+- `speedtest` — download speed test (~1 MB, shows Mbps)
+
+Web:
+- `headers <url>` — show HTTP response headers for a URL
+
+Ports:
+- `ports` — show all listening TCP ports with PID and process name
+- `kill <port>` — kill the process running on a specific port
+
+Maintenance:
+- `flush dns` — flush the DNS resolver cache
 
 Example:
 ```cmc
-ports
+ping google.com
+dns github.com
+headers api.example.com
 kill 3000
+```
+
+---
+
+# ===========================
+# 13c. MEDIA TOOLS (FFmpeg)
+# ===========================
+
+Requires FFmpeg installed (`winget install Gyan.FFmpeg`).
+
+Convert:
+- `convert '<file>' to <format>` — convert to any format (mp3, mp4, gif, wav, avi, mkv, flac, webm ...)
+- `extract audio '<video>'` — extract audio track from video (→ .mp3)
+
+Edit:
+- `trim '<file>' <start> <end>` — cut a section (e.g. `trim 'v.mp4' 0:30 1:45`)
+- `resize '<file>' <WxH>` — resize video or image (e.g. `resize 'v.mp4' 1280x720`)
+- `rotate '<file>' <degrees>` — rotate video (90, 180, 270)
+- `volume '<file>' <level>` — adjust audio volume (e.g. 50%, 200%)
+
+Optimize:
+- `compress '<file>'` — reduce file size
+- `merge '<file1>' '<file2>'` — concatenate media files
+
+Info:
+- `media info '<file>'` — show duration, resolution, codec, bitrate
+- `thumbnail '<video>' [time]` — extract a frame as image (default: 0:05)
+
+Example:
+```cmc
+convert 'song.wav' to mp3
+trim 'video.mp4' 0:10 0:45
+compress 'recording.mp4'
+merge 'part1.mp4' 'part2.mp4'
 ```
 
 ---

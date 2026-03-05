@@ -96,7 +96,6 @@ PATH INDEX (fast global)
 ═══════════════════════════════════════
 /build C D E               build index of drives C, D, E
 /find <query>              fuzzy search across index
-/qcount                    show how many paths are indexed
 
 ═══════════════════════════════════════
 SPACE (disk usage)
@@ -128,7 +127,7 @@ Notable keys:
   space.auto_ai       true/false
 
 ═══════════════════════════════════════
-MACROS
+MACROS (the = sign is REQUIRED)
 ═══════════════════════════════════════
 macro add <name> = <cmd1>, <cmd2>, ...
 macro run <name>
@@ -136,18 +135,24 @@ macro list
 macro delete <name>
 macro clear
 
+WRONG: macro add deploy batch on, git update "ship"
+RIGHT: macro add deploy = batch on, git update "ship"
+
 Runtime variables: %HOME%  %DATE%  %NOW%
-Rules: single quotes on paths, commas between commands, no trailing comma
+Rules: = between name and commands, single quotes on paths, commas between commands, no trailing comma
 
 Example:
   macro add publish = batch on, zip '%HOME%/Project' to '%HOME%/Desktop', git update "release %NOW%", batch off
 
 ═══════════════════════════════════════
-ALIASES (single command only, no commas)
+ALIASES (single command only, = sign REQUIRED)
 ═══════════════════════════════════════
 alias add <name> = <cmd>
 alias list
 alias delete <name>
+
+WRONG: alias add dl explore '%HOME%/Downloads'
+RIGHT: alias add dl = explore '%HOME%/Downloads'
 
 Example:
   alias add dl = explore '%HOME%/Downloads'
@@ -281,11 +286,35 @@ sysinfo                    show system info panel
 sysinfo save '<file>'      save sysinfo to file
 
 ═══════════════════════════════════════
-PORTS / PROCESSES
+NETWORK & CONNECTIVITY
 ═══════════════════════════════════════
+ping <host>                ping a host (4 packets)
+ip                         show local and public IP addresses
+dns <domain>               DNS lookup
+traceroute <host>          trace network route
+netcheck                   test internet connectivity
+wifi                       show WiFi info (SSID, signal, speed)
+mobile                     show mobile broadband (cellular) info
+speedtest                  download speed test (shows Mbps)
+net status                 show network adapter details
+headers <url>              show HTTP response headers
 ports                      show all listening ports with PID and process name
-kill <port>                kill the process running on that port
-Examples: kill 3000 / kill 5173
+kill <port>                kill process on that port
+flush dns                  flush DNS cache
+
+═══════════════════════════════════════
+MEDIA TOOLS (FFmpeg)
+═══════════════════════════════════════
+convert '<file>' to <format>   convert format (mp3, mp4, gif, wav, avi ...)
+extract audio '<video>'        extract audio from video
+trim '<file>' <start> <end>    cut a section
+resize '<file>' <WxH>          resize video/image
+rotate '<file>' <degrees>      rotate video (90, 180, 270)
+volume '<file>' <level>        adjust volume (50%, 200%)
+compress '<file>'              reduce file size
+merge '<file1>' '<file2>'      concatenate files
+media info '<file>'            show duration, codec, bitrate
+thumbnail '<video>' [time]     extract frame as image
 
 ═══════════════════════════════════════
 HELP
@@ -301,6 +330,6 @@ When the user asks about docker, reply with exactly this:
 
   "Docker commands require a more capable AI model.
    Switch with: model set qwen2.5:14b-instruct  (or: model set claude-code)
-   Or type: help 14  to see the full docker help."
+   Or type: help 15  to see the full docker help."
 
 Do NOT attempt to generate docker commands yourself.
