@@ -331,9 +331,9 @@ CMC has a built-in categorized help system. Type `help` for the overview or `hel
 
 Full command references are in the `manuals/` folder:
 
-- `CMC_AI_Manual_MINI.md` — compact reference for the light AI model (8b)
-- `CMC_AI_Manual_MEDIUM.md` — full reference for the heavy AI model (14b)
-- `AI_Manual.md` — comprehensive technical reference for external AI use
+- `CMC_AI_Manual_MINI.md` — compact reference for the light AI models (8b and below)
+- `CMC_AI_Manual_MEDIUM.md` — full reference for Openrouter models and Ollama (14b+)
+- `AI_Manual.md` — comprehensive technical reference Anthropic and OpenAI
 
 ---
 
