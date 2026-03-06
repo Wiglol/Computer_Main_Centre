@@ -146,9 +146,12 @@ def _start_bg_update_check():
         if result == "update_available":
             try:
                 if RICH:
-                    console.print("[yellow]●[/yellow] [bold yellow]CMC update available[/bold yellow]  [dim]→ run:[/dim] [cyan]cmc update[/cyan]")
+                    console.print(Panel.fit(
+                        "[yellow]●[/yellow] [bold yellow]CMC update available[/bold yellow]  [dim]→ run:[/dim] [cyan]cmc update[/cyan]",
+                        border_style="yellow", padding=(0, 2),
+                    ))
                 else:
-                    print("● CMC update available — run: cmc update")
+                    print("[ CMC update available — run: cmc update ]")
             except Exception:
                 pass
 
