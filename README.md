@@ -4,10 +4,10 @@
 
 # Computer Main Centre
 
-**A local command console for Windows** — file management, Git, Docker, AI assistant, macros, and more in one place.
+**A local command console for Windows, Linux and macOS** — file management, Git, Docker, AI assistant, network tools, media conversion, macros, and more in one place.
 
 [![Python](https://img.shields.io/badge/Python-3.10+-3776ab?style=flat-square&logo=python&logoColor=white)](https://python.org)
-[![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078d4?style=flat-square&logo=windows)](https://microsoft.com/windows)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-0078d4?style=flat-square)](https://github.com/Wiglol/Computer_Main_Centre)
 [![AI](https://img.shields.io/badge/AI-Multi%20backend-7c3aed?style=flat-square)](https://github.com/Wiglol/Computer_Main_Centre)
 [![License](https://img.shields.io/badge/License-MIT-22c55e?style=flat-square)](LICENSE.txt)
 
@@ -17,7 +17,7 @@
 
 ## What is CMC?
 
-CMC is a Python-powered console that brings together file operations, GitHub publishing, Docker control, a fully local AI assistant, automation macros, and more — all with one consistent, easy-to-remember command syntax.
+CMC is a Python-powered console that brings together file operations, GitHub publishing, Docker control, network diagnostics, media/FFmpeg tools, a multi-backend AI assistant, automation macros, and more — all with one consistent, easy-to-remember command syntax.
 
 No need to remember different CLI tools. One console, one language.
 
@@ -31,9 +31,11 @@ No need to remember different CLI tools. One console, one language.
 | 🔄 | **Macros & chains** — save and run multi-step automation | `macro add deploy = backup ..., git update` |
 | 🤖 | **AI assistant** — Ollama, Claude Code, OpenAI, Anthropic, OpenRouter | `ai how do I zip a folder and push it?` |
 | 📁 | **File operations** — copy, move, zip, backup, search | `backup 'C:/Project' 'C:/Backups'` |
+| 🌐 | **Network toolkit** — ping, DNS, traceroute, WiFi, speed test | `ping google.com`, `speedtest` |
+| 🎬 | **Media tools** — convert, trim, compress, resize (FFmpeg) | `convert 'video.mp4' to gif` |
 | 🛡️ | **Dry-run + Undo** — preview or reverse almost any action | `dry-run on`, `undo` |
 | 🔍 | **Fast global search** — index drives, search instantly | `/build C D`, `/find ProjectName` |
-| ☕ | **Java version switcher** — switch versions, CMC handles UAC | `java change 17` |
+| ☕ | **Java version switcher** — switch versions, handles registry/PATH | `java change 17` |
 | 🏗️ | **Project scaffolding** — spin up Flask, React, Node, and more | `new flask`, `setup`, `dev` |
 | 🐳 | **Docker** — container control + power commands | `docker ps`, `docker watch myapp` |
 
@@ -55,7 +57,11 @@ Run `CMC_AI_Setup.cmd` from the CMC folder.
 If you want local/offline AI, install [Ollama](https://ollama.com/download) first.
 
 **4. Launch CMC**
-Double-click `Start_CMC.vbs`
+
+| Platform | Method |
+|---|---|
+| Windows | Double-click `Start_CMC.vbs` |
+| Linux / macOS | `python3 src/Computer_Main_Centre.py` |
 
 ---
 
@@ -141,7 +147,7 @@ ai <question>                 Ask anything — context-aware
 ai fix                        Auto-explain the last failed command
 ai clear                      Reset conversation history
 
-ai-model pick                 Interactive model/backend picker
+ai-model pick                 Interactive model/backend picker (arrow keys)
 ai-model list                 Show available backends/models + status
 ai-model current              Show active model (and effort when applicable)
 
@@ -151,6 +157,45 @@ ai key detect                 Show which keys are currently set
 ```
 
 Claude Code and OpenAI support effort selection (`default`, `low`, `medium`, `high`) from `ai-model pick`.
+
+---
+
+## Network Toolkit
+
+A full set of network diagnostics built in — no need to remember `ipconfig` vs `ip addr` vs `ifconfig`. CMC picks the right command for your OS.
+
+```
+ping <host>                   Ping a host
+ip                            Show your local + public IP
+dns <domain>                  DNS lookup (A, AAAA, MX, NS, TXT)
+traceroute <host>             Trace network route
+wifi                          Show WiFi SSID, signal, speed, channel
+mobile                        Show cellular/mobile broadband info
+speedtest                     Download speed test (Mbps)
+net status                    Network adapter details
+flush dns                     Flush DNS resolver cache
+ports                         List listening ports
+headers <url>                 Show HTTP response headers
+```
+
+---
+
+## Media Tools (FFmpeg)
+
+Simplified media conversion and editing. CMC auto-detects FFmpeg even if it's not in your PATH.
+
+```
+convert 'video.mp4' to gif                Convert between any format
+extract audio 'video.mp4'                 Pull audio track from video
+trim 'video.mp4' 00:01:00 00:02:30        Cut a clip
+resize 'image.png' 800x600                Resize video or image
+rotate 'video.mp4' 90                     Rotate 90/180/270 degrees
+volume 'audio.mp3' 200%                   Adjust audio volume
+compress 'video.mp4'                      Reduce file size (shows % saved)
+merge 'part1.mp4' 'part2.mp4'             Concatenate media files
+media info 'file.mp4'                     Show duration, codec, bitrate, resolution
+thumbnail 'video.mp4' 00:00:30            Extract a single frame as image
+```
 
 ---
 
@@ -200,6 +245,20 @@ env list / env check
 </details>
 
 <details>
+<summary>☕ Java</summary>
+
+```
+java list                        Show all detected Java installations
+java change 17                   Switch to Java 17 (updates PATH + JAVA_HOME)
+java set 'C:/path/to/jdk'       Set a specific Java path
+```
+
+On Windows, CMC updates the registry and requests UAC elevation for system-wide changes.
+On Linux/Mac, it updates `~/.bashrc` or `~/.zshrc`.
+
+</details>
+
+<details>
 <summary>🐳 Docker</summary>
 
 Standard Docker commands simplified (`ps`, `start`, `stop`, `shell`, `logs`, `build`, `compose`, etc.) plus some power commands not in the standard CLI:
@@ -215,7 +274,7 @@ docker size <image>         Layer-by-layer size breakdown
 docker port-check           Check compose ports vs system
 ```
 
-Type `help 14` inside CMC for the full Docker reference.
+Type `help 15` inside CMC for the full Docker reference.
 
 </details>
 
@@ -227,17 +286,44 @@ Type `help 14` inside CMC for the full Docker reference.
 - **`batch on`** — skip all confirmation prompts (useful inside macros)
 - **`undo`** — reverse the last action up to 30 steps
 - **`status`** — see current modes, AI model, Java version, macro count, undo depth
+- **`log`** — view command history with timestamps
 
 ---
 
 ## Requirements
 
-- Windows 10 / 11
 - Python 3.10+
-- [Git for Windows](https://git-scm.com/) — for Git features
+- **Windows 10/11**, **Linux**, or **macOS**
+- [Git](https://git-scm.com/) — for Git features
 - [Ollama](https://ollama.com/download) — optional local/offline AI backend
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) — optional backend (no API key required)
+- [FFmpeg](https://ffmpeg.org/) — optional, for media commands
 - Optional API keys for OpenAI / Anthropic / OpenRouter if using those backends
+
+---
+
+## Help System
+
+CMC has a built-in categorized help system. Type `help` for the overview or `help <number>` for a specific section:
+
+| # | Section |
+|---|---|
+| 1 | Navigation |
+| 2 | File Operations |
+| 3 | Search |
+| 4 | Zip & Backup |
+| 5 | Git |
+| 6 | Macros & Aliases |
+| 7 | AI Assistant |
+| 8 | Java |
+| 9 | Project Tools |
+| 10 | System & Info |
+| 11 | Automation |
+| 12 | Appearance |
+| 13 | Network & Connectivity |
+| 14 | Media Tools (FFmpeg) |
+| 15 | Docker |
+| 16 | Flags & Modes |
 
 ---
 
