@@ -130,7 +130,7 @@ def _start_bg_update_check():
     """
     Kick off a background thread that checks for CMC updates.
     Sets STATE["cmc_update_status"] when done.
-    If an update is available, prints a notification below the header.
+    Notification is displayed from the main loop before the first prompt.
     """
     import threading
 
@@ -142,18 +142,6 @@ def _start_bg_update_check():
         except Exception:
             result = "unknown"
         STATE["cmc_update_status"] = result
-        # Only show a notification if there's actually an update
-        if result == "update_available":
-            try:
-                if RICH:
-                    console.print(Panel.fit(
-                        "[yellow]●[/yellow] [bold yellow]CMC update available[/bold yellow]  [dim]→ run:[/dim] [cyan]cmc update[/cyan]",
-                        border_style="yellow", padding=(0, 2),
-                    ))
-                else:
-                    print("[ CMC update available — run: cmc update ]")
-            except Exception:
-                pass
 
     t = threading.Thread(target=_worker, daemon=True)
     t.start()
@@ -6562,8 +6550,21 @@ def main():
             print("Welcome to CMC! Type 'help' to see all commands.")
         mark_first_run_done()
 
+    _update_notified = False
+
     while True:
         try:
+            # Show update notification once, cleanly before the prompt
+            if not _update_notified and STATE.get("cmc_update_status") == "update_available":
+                _update_notified = True
+                if RICH:
+                    console.print(Panel.fit(
+                        "[yellow]●[/yellow] [bold yellow]CMC update available[/bold yellow]  [dim]→ run:[/dim] [cyan]cmc update[/cyan]",
+                        border_style="yellow", padding=(0, 2),
+                    ))
+                else:
+                    print("[ CMC update available — run: cmc update ]")
+
             # On the very first prompt ever, pre-fill "help" so the user just hits Enter
             prompt_default = "help" if first_run else ""
             first_run = False   # only pre-fill once
