@@ -126,6 +126,12 @@ def _python() -> str:
     return sys.executable or "python"
 
 
+def _venv_activate_str() -> str:
+    """Return the venv activation command string for README/messages."""
+    from CMC_Platform import IS_WINDOWS
+    return "venv\\Scripts\\activate" if IS_WINDOWS else "source venv/bin/activate"
+
+
 def _slugify(name: str) -> str:
     clean, last_dash = [], False
     for ch in name.strip():
@@ -279,7 +285,8 @@ def handle_setup(cwd: Path, p: PFunc) -> None:
                 _launch_dev_python(cwd, entry, p)
         else:
             p("[green]✓ Python project ready.[/green]")
-            p("[dim]Activate venv:  venv\\Scripts\\activate[/dim]")
+            from CMC_Platform import get_venv_activate_instruction
+            p(f"[dim]Activate venv:  {get_venv_activate_instruction()}[/dim]")
         return
 
     # ── Rust ──────────────────────────────────────────────────────────────
@@ -326,15 +333,24 @@ def _open_browser(url: str, delay: float, p: PFunc) -> None:
 
 
 def _spawn(cmd: str, cwd: Path, p: PFunc, label: str) -> None:
-    """Open a new cmd window running cmd. Stores PID in _DEV_PID."""
+    """Open a new terminal window running cmd. Stores PID in _DEV_PID."""
     global _DEV_PID
     p(f"[green]Starting:[/green] {label}")
     try:
-        proc = subprocess.Popen(
-            "start cmd /k " + cmd,
-            cwd=str(cwd),
-            shell=True,
-        )
+        from CMC_Platform import IS_WINDOWS
+        if IS_WINDOWS:
+            proc = subprocess.Popen(
+                "start cmd /k " + cmd,
+                cwd=str(cwd),
+                shell=True,
+            )
+        else:
+            # On Linux/Mac, run in background in current terminal
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(cwd),
+                shell=True,
+            )
         _DEV_PID = proc.pid
     except Exception as exc:
         p(f"[red]Failed to launch:[/red] {exc}")
@@ -371,21 +387,37 @@ def _launch_node(cwd: Path, entry: str, port: str, p: PFunc) -> None:
 
 def _launch_python_entry(cwd: Path, entry: str, port: str, p: PFunc) -> None:
     """python <entry> in new window (activates venv if present) + open browser."""
-    activate = cwd / "venv" / "Scripts" / "activate.bat"
-    if activate.exists():
-        cmd = f'"cmd" /k "call venv\\Scripts\\activate.bat && python {entry}"'
+    from CMC_Platform import IS_WINDOWS
+    if IS_WINDOWS:
+        activate = cwd / "venv" / "Scripts" / "activate.bat"
+        if activate.exists():
+            cmd = f'"cmd" /k "call venv\\Scripts\\activate.bat && python {entry}"'
+        else:
+            cmd = f'"python" {entry}'
     else:
-        cmd = f'"python" {entry}'
+        activate = cwd / "venv" / "bin" / "activate"
+        if activate.exists():
+            cmd = f'bash -c "source venv/bin/activate && python {entry}"'
+        else:
+            cmd = f'python {entry}'
     _spawn(cmd, cwd, p, f"python {entry}")
     _open_browser(f"http://localhost:{port}", 3, p)
 
 
 def _launch_django(cwd: Path, p: PFunc) -> None:
-    activate = cwd / "venv" / "Scripts" / "activate.bat"
-    if activate.exists():
-        cmd = '"cmd" /k "call venv\\Scripts\\activate.bat && python manage.py runserver"'
+    from CMC_Platform import IS_WINDOWS
+    if IS_WINDOWS:
+        activate = cwd / "venv" / "Scripts" / "activate.bat"
+        if activate.exists():
+            cmd = '"cmd" /k "call venv\\Scripts\\activate.bat && python manage.py runserver"'
+        else:
+            cmd = '"python" manage.py runserver'
     else:
-        cmd = '"python" manage.py runserver'
+        activate = cwd / "venv" / "bin" / "activate"
+        if activate.exists():
+            cmd = 'bash -c "source venv/bin/activate && python manage.py runserver"'
+        else:
+            cmd = 'python manage.py runserver'
     _spawn(cmd, cwd, p, "python manage.py runserver")
     _open_browser("http://localhost:8000", 3, p)
 
@@ -628,11 +660,11 @@ def _new_python(name: str, slug: str, folder: Path, p: PFunc) -> None:
     _write(folder / ".gitignore", _gitignore_python())
     _write(folder / "README.md", _readme(name,
         "A Python project.\n\n## Setup\n```\npython -m venv venv\n"
-        "venv\\Scripts\\activate\npip install -r requirements.txt\npython main.py\n```"
+        f"{_venv_activate_str()}\npip install -r requirements.txt\npython main.py\n```"
     ))
     if _yn("Create virtual environment now?"):
         _run_live([_python(), "-m", "venv", "venv"], cwd=folder)
-        p("[green]✓ venv created. Activate with: venv\\Scripts\\activate[/green]")
+        p(f"[green]✓ venv created. Activate with: {_venv_activate_str()}[/green]")
     if _yn("Initialise git repo?", False):
         _run(["git", "init"], cwd=folder)
         p("[green]✓ git init done.[/green]")
@@ -675,7 +707,7 @@ def _new_flask(name: str, slug: str, folder: Path, p: PFunc) -> None:
     _write(folder / ".env.example", "FLASK_ENV=development\nFLASK_DEBUG=1\n")
     _write(folder / ".gitignore", _gitignore_python())
     _write(folder / "README.md", _readme(name,
-        "A Flask API.\n\n## Run\n```\npython -m venv venv\nvenv\\Scripts\\activate\n"
+        f"A Flask API.\n\n## Run\n```\npython -m venv venv\n{_venv_activate_str()}\n"
         "pip install -r requirements.txt\npython app.py\n```"
     ))
     if _yn("Create venv and install dependencies?"):
@@ -705,7 +737,7 @@ def _new_fastapi(name: str, slug: str, folder: Path, p: PFunc) -> None:
     _write(folder / ".env.example", "PORT=8000\n")
     _write(folder / ".gitignore", _gitignore_python())
     _write(folder / "README.md", _readme(name,
-        "A FastAPI project.\n\n## Run\n```\npython -m venv venv\nvenv\\Scripts\\activate\n"
+        f"A FastAPI project.\n\n## Run\n```\npython -m venv venv\n{_venv_activate_str()}\n"
         "pip install -r requirements.txt\npython main.py\n```\n"
         "Docs: http://localhost:8000/docs"
     ))
@@ -924,7 +956,7 @@ def _new_discord(name: str, slug: str, folder: Path, p: PFunc) -> None:
         "A Discord.py bot.\n\n## Setup\n"
         "1. Create a bot at https://discord.com/developers/applications\n"
         "2. Copy your token into `.env`\n"
-        "3. Run:\n```\npython -m venv venv\nvenv\\Scripts\\activate\n"
+        f"3. Run:\n```\npython -m venv venv\n{_venv_activate_str()}\n"
         "pip install -r requirements.txt\npython bot.py\n```"
     ))
     if _yn("Create venv and install discord.py?"):

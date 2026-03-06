@@ -4,19 +4,14 @@ import sys, re, pathlib, subprocess, importlib, platform
 Path = pathlib.Path
 globals()["Path"] = pathlib.Path
 
-# Minimal global print wrapper; Rich can override later
-def p(x):
-    try:
-        console = globals().get("console")
-        if console:
-            console.print(x)
-            return
-    except Exception:
-        pass
+# Minimal bootstrap print (used before Rich is loaded)
+def _bootstrap_print(x):
     try:
         print(re.sub(r"\[/?[a-z]+\]", "", str(x)))
     except Exception:
         print(str(x))
+
+p = _bootstrap_print  # overwritten after Rich loads
 
 # ---------- Dependency auto-check ----------
 MIN_PY = (3, 10)
@@ -56,9 +51,26 @@ def ensure_packages():
     if installed_any:
         p("✅ All dependencies installed.\n")
 
+_DEPS_SENTINEL = Path.home() / ".ai_helper" / ".cmc_deps_ok"
+
+def _deps_already_checked() -> bool:
+    try:
+        return _DEPS_SENTINEL.exists()
+    except Exception:
+        return False
+
+def _mark_deps_ok():
+    try:
+        _DEPS_SENTINEL.parent.mkdir(parents=True, exist_ok=True)
+        _DEPS_SENTINEL.write_text("ok", encoding="utf-8")
+    except Exception:
+        pass
+
 check_python_version()
-upgrade_pip()
-ensure_packages()
+if not _deps_already_checked():
+    upgrade_pip()
+    ensure_packages()
+    _mark_deps_ok()
 # ---------- End of bootstrap ----------
 
 
@@ -118,20 +130,27 @@ def _start_bg_update_check():
     """
     Kick off a background thread that checks for CMC updates.
     Sets STATE["cmc_update_status"] when done.
-    Uses CMC_Update.cmc_update_status_check() which works for both
-    git clones and plain zip installs.
+    If an update is available, prints a notification below the header.
     """
     import threading
 
     def _worker():
         try:
             from CMC_Update import cmc_update_status_check
-            # Root of CMC is one level up from src/
             cmc_root = Path(__file__).resolve().parent.parent
             result = cmc_update_status_check(cmc_root)
         except Exception:
             result = "unknown"
         STATE["cmc_update_status"] = result
+        # Only show a notification if there's actually an update
+        if result == "update_available":
+            try:
+                if RICH:
+                    console.print("[yellow]●[/yellow] [bold yellow]CMC update available[/bold yellow]  [dim]→ run:[/dim] [cyan]cmc update[/cyan]")
+                else:
+                    print("● CMC update available — run: cmc update")
+            except Exception:
+                pass
 
     t = threading.Thread(target=_worker, daemon=True)
     t.start()
@@ -192,7 +211,7 @@ except Exception:
     HAVE_ASSISTANT = False
 
 
-def _check_ollama_alive(timeout: float = 0.5) -> bool:
+def _check_ollama_alive(timeout: float = 0.1) -> bool:
     """Quick TCP check — True if Ollama is listening on localhost:11434."""
     try:
         import socket
@@ -218,12 +237,8 @@ _MACRO_CONT_PARTS: list = [] # command chunks collected so far
 
 
 # ==========================================================
-# 🔧  Computer Main Centre – Auto-Setup & Dependency Checker
+# 🔧  Global State & Config
 # ==========================================================
-import importlib, platform
-MIN_PY = (3, 10)
-REQUIRED = ["rich", "requests", "pyautogui", "prompt_toolkit", "psutil"]
-...
 
 
 # ---------- Global state ----------
@@ -271,7 +286,7 @@ JAVA_VERSIONS = {
 }
 
 # Config directory (same as before)
-CFG_DIR = Path(os.path.expandvars(r"%USERPROFILE%\\.ai_helper"))
+CFG_DIR = Path.home() / ".ai_helper"
 CFG_DIR.mkdir(parents=True, exist_ok=True)
 JAVA_CFG = CFG_DIR / "java.json"
 
@@ -523,36 +538,18 @@ def show_header():
     batch_val = "[yellow]ON[/yellow]" if STATE["batch"] else "[dim]off[/dim]"
     dry_val   = "[yellow]ON[/yellow]" if STATE["dry_run"] else "[dim]off[/dim]"
 
-    show_update = get_config_value(CONFIG, "header.show_update", True)
-
-    upd = STATE.get("cmc_update_status", "unknown")
-    if upd == "up_to_date":
-        update_line = "[green]●[/green] CMC up to date"
-    elif upd == "update_available":
-        update_line = "[yellow]●[/yellow] [bold yellow]CMC update available[/bold yellow]  [dim]→ run:[/dim] [cyan]cmc update[/cyan]"
-    elif upd == "diverged":
-        update_line = "[red]●[/red] CMC has local changes"
-    elif upd == "checking":
-        update_line = "[dim]●[/dim] CMC checking..."
-    else:
-        update_line = "[dim]●[/dim] CMC status unknown"
-
     sep = "[dim] │ [/dim]"
     header_lines = [
         "[bold cyan]Computer Main Centre[/bold cyan]  [dim]— local command console[/dim]",
         f"[cyan]Batch:[/cyan] {batch_val}{sep}[cyan]Dry-Run:[/cyan] {dry_val}{sep}[cyan]AI:[/cyan] {ai_display} ({ai_status})",
     ]
-    if show_update:
-        header_lines.append(update_line)
-    lines = header_lines
-    content = "\n".join(lines)
+    content = "\n".join(header_lines)
 
     if RICH:
         console.print(Panel.fit(content, border_style="cyan", padding=(0, 2)))
     else:
         print("Computer Main Centre — local command console")
         print(f"Batch: {'ON' if STATE['batch'] else 'off'}  Dry-Run: {'ON' if STATE['dry_run'] else 'off'}  AI: {ai_display}")
-        print(f"CMC: {upd}")
 
 _FIRST_RUN_SENTINEL    = DATA_DIR / ".cmc_first_run_done"
 _AI_FIX_TIP_SENTINEL   = DATA_DIR / ".cmc_ai_fix_tip_shown"
@@ -1068,7 +1065,8 @@ def op_open(path):
     fp = resolve(raw)
     try:
         if not STATE["dry_run"]:
-            os.startfile(str(fp))
+            from CMC_Platform import open_file
+            open_file(str(fp))
             log_action(f"OPENED {fp}")
     except Exception as e:
         p(f"[red]❌ {e}[/red]" if RICH else f"Error: {e}")
@@ -1079,9 +1077,10 @@ def op_explore(path):
     try:
         target = fp if fp.is_dir() else fp.parent
         if not STATE["dry_run"]:
-            subprocess.Popen(["explorer", str(target)])
+            from CMC_Platform import open_file_manager
+            open_file_manager(str(target))
             log_action(f"EXPLORED {target}")
-            p(f"📂 Explorer opened: {target}")
+            p(f"📂 File manager opened: {target}")
     except Exception as e:
         p(f"[red]❌ Error:[/red] {e}" if RICH else f"Error: {e}")
 
@@ -1114,25 +1113,45 @@ def op_sysinfo(save_path=None):
         info["CPU"] = platform.processor() or "Unknown"
         info["Cores"] = psutil.cpu_count(logical=True)
         info["RAM"] = f"{round(psutil.virtual_memory().total / (1024**3), 1)} GB"
-        # GPU via wmic
+        # GPU detection (cross-platform)
+        from CMC_Platform import IS_WINDOWS, IS_LINUX
         try:
-            gpu_out = subprocess.check_output(
-                "wmic path win32_VideoController get name", shell=True, text=True, encoding="utf-8"
-            )
-            gpus = [g.strip() for g in gpu_out.splitlines() if g.strip() and "Name" not in g]
-            info["GPU"] = ", ".join(gpus) if gpus else "Unknown"
+            if IS_WINDOWS:
+                gpu_out = subprocess.check_output(
+                    "wmic path win32_VideoController get name", shell=True, text=True, encoding="utf-8"
+                )
+                gpus = [g.strip() for g in gpu_out.splitlines() if g.strip() and "Name" not in g]
+                info["GPU"] = ", ".join(gpus) if gpus else "Unknown"
+            elif IS_LINUX:
+                gpu_out = subprocess.check_output(
+                    ["lspci"], text=True, encoding="utf-8", stderr=subprocess.DEVNULL
+                )
+                gpus = [l.split(": ", 1)[1] for l in gpu_out.splitlines()
+                        if "VGA" in l or "3D" in l or "Display" in l]
+                info["GPU"] = ", ".join(gpus) if gpus else "Unknown"
+            else:
+                gpu_out = subprocess.check_output(
+                    ["system_profiler", "SPDisplaysDataType"], text=True, encoding="utf-8"
+                )
+                for line in gpu_out.splitlines():
+                    if "Chipset Model" in line or "Chip" in line:
+                        info["GPU"] = line.split(":", 1)[1].strip()
+                        break
+                else:
+                    info["GPU"] = "Unknown"
         except Exception:
             info["GPU"] = "Unknown"
-        # PSU info (limited support)
-        try:
-            psu_out = subprocess.check_output(
-                'powershell "Get-WmiObject Win32_PowerSupply | Select-Object Name,Manufacturer"',
-                shell=True, text=True, encoding="utf-8"
-            )
-            psu_lines = [l.strip() for l in psu_out.splitlines() if l.strip()]
-            info["PSU"] = "; ".join(psu_lines[2:]) if len(psu_lines) > 2 else "Unknown / No telemetry"
-        except Exception:
-            info["PSU"] = "Unknown / No telemetry"
+        # PSU info (Windows only)
+        if IS_WINDOWS:
+            try:
+                psu_out = subprocess.check_output(
+                    'powershell "Get-WmiObject Win32_PowerSupply | Select-Object Name,Manufacturer"',
+                    shell=True, text=True, encoding="utf-8"
+                )
+                psu_lines = [l.strip() for l in psu_out.splitlines() if l.strip()]
+                info["PSU"] = "; ".join(psu_lines[2:]) if len(psu_lines) > 2 else "Unknown / No telemetry"
+            except Exception:
+                info["PSU"] = "Unknown / No telemetry"
         # Uptime
         info["Uptime"] = f"{round(time.time() - psutil.boot_time())/3600:.1f} h"
     except Exception as e:
@@ -2126,12 +2145,8 @@ def filename_from_url(url):
 
 def op_open_url(url):
     try:
-        if sys.platform.startswith("win"):
-            os.startfile(url)
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", url])
-        else:
-            subprocess.Popen(["xdg-open", url])
+        from CMC_Platform import open_url
+        open_url(url)
         log_action(f"OPEN_URL {url}")
     except Exception as e:
         p(f"[red]❌ {e}[/red]" if RICH else f"Error: {e}")
@@ -2441,55 +2456,79 @@ def op_undo():
 
 # ---------- Auto-detect installed Java versions ----------
 def detect_java_versions():
-    """Scan registry and common folders for Java installations."""
+    """Scan registry (Windows) and common folders for Java installations."""
+    from CMC_Platform import IS_WINDOWS
     detected = {}
 
-    try:
-        import winreg
-        reg_paths = [
-            r"SOFTWARE\\Eclipse Adoptium",
-            r"SOFTWARE\\JavaSoft\\Java Development Kit",
-            r"SOFTWARE\\JavaSoft\\JDK",
-            r"SOFTWARE\\JavaSoft\\Java Runtime Environment",
-        ]
-        for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
-            for path in reg_paths:
-                try:
-                    with winreg.OpenKey(root, path) as key:
-                        i = 0
-                        while True:
-                            try:
-                                sub = winreg.EnumKey(key, i)
-                                with winreg.OpenKey(key, sub) as subkey:
-                                    try:
-                                        home, _ = winreg.QueryValueEx(subkey, "JavaHome")
-                                        if Path(home).exists():
-                                            detected[sub] = home
-                                    except FileNotFoundError:
-                                        pass
-                            except OSError:
-                                break
-                            i += 1
-                except FileNotFoundError:
-                    continue
-    except Exception:
-        pass
+    # Windows: scan registry
+    if IS_WINDOWS:
+        try:
+            import winreg
+            reg_paths = [
+                r"SOFTWARE\\Eclipse Adoptium",
+                r"SOFTWARE\\JavaSoft\\Java Development Kit",
+                r"SOFTWARE\\JavaSoft\\JDK",
+                r"SOFTWARE\\JavaSoft\\Java Runtime Environment",
+            ]
+            for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+                for path in reg_paths:
+                    try:
+                        with winreg.OpenKey(root, path) as key:
+                            i = 0
+                            while True:
+                                try:
+                                    sub = winreg.EnumKey(key, i)
+                                    with winreg.OpenKey(key, sub) as subkey:
+                                        try:
+                                            home, _ = winreg.QueryValueEx(subkey, "JavaHome")
+                                            if Path(home).exists():
+                                                detected[sub] = home
+                                        except FileNotFoundError:
+                                            pass
+                                except OSError:
+                                    break
+                                i += 1
+                    except FileNotFoundError:
+                        continue
+        except Exception:
+            pass
 
-    # Folder scan fallback
-    search_roots = [
-        Path("C:/Program Files/Eclipse Adoptium"),
-        Path("C:/Program Files/Java"),
-        Path("C:/Program Files (x86)/Java"),
-    ]
+    # Folder scan — platform-aware paths
+    if IS_WINDOWS:
+        search_roots = [
+            Path("C:/Program Files/Eclipse Adoptium"),
+            Path("C:/Program Files/Java"),
+            Path("C:/Program Files (x86)/Java"),
+        ]
+    else:
+        search_roots = [
+            Path("/usr/lib/jvm"),
+            Path("/usr/java"),
+            Path("/usr/local/java"),
+            Path(os.path.expanduser("~/.sdkman/candidates/java")),
+        ]
+        # Also check JAVA_HOME
+        jh = os.environ.get("JAVA_HOME")
+        if jh and Path(jh).exists():
+            detected["JAVA_HOME"] = jh
+
     for root in search_roots:
         if root.exists():
             for sub in root.iterdir():
-                if sub.is_dir() and ("jdk" in sub.name.lower() or "jre" in sub.name.lower()):
+                if sub.is_dir() and ("jdk" in sub.name.lower() or "jre" in sub.name.lower()
+                                     or "java" in sub.name.lower()):
                     detected[sub.name] = str(sub)
 
     return detected
 
-JAVA_VERSIONS = detect_java_versions()
+_JAVA_VERSIONS_CACHE = None
+
+def get_java_versions():
+    """Lazy-load Java versions (only scanned on first call)."""
+    global _JAVA_VERSIONS_CACHE
+    if _JAVA_VERSIONS_CACHE is None:
+        _JAVA_VERSIONS_CACHE = detect_java_versions()
+    return _JAVA_VERSIONS_CACHE
 
 
 # ---------- Macros (persistent) ----------
@@ -2722,7 +2761,7 @@ def _current_ai_model_with_effort_label() -> str:
     return model_label
 
 
-def _pick_effort_for_backend(p, backend: str, has_msvcrt: bool, rescape) -> str | None:
+def _pick_effort_for_backend(p, backend: str, has_getch: bool, rescape) -> str | None:
     """
     Interactive effort selector.
     Returns: '' (default), 'low'|'medium'|'high', or None if cancelled.
@@ -2764,8 +2803,8 @@ def _pick_effort_for_backend(p, backend: str, has_msvcrt: bool, rescape) -> str 
             selected = i
             break
 
-    if has_msvcrt and RICH:
-        import msvcrt as _msvcrt
+    if has_getch and RICH:
+        from CMC_Platform import getch as _getch, IS_WINDOWS
         import sys as _sys
         console.print(f"\n[bold cyan]Select Effort ({backend})[/bold cyan]  [dim]up/down, Enter, Esc[/dim]")
         console.print("[dim]" + "─" * 54 + "[/dim]")
@@ -2784,20 +2823,31 @@ def _pick_effort_for_backend(p, backend: str, has_msvcrt: bool, rescape) -> str 
             console.print(_render(i, i == selected))
 
         while True:
-            key = _msvcrt.getch()
+            key = _getch()
             moved = False
-            if key in (b'\xe0', b'\x00'):
-                key2 = _msvcrt.getch()
+            if IS_WINDOWS and key in (b'\xe0', b'\x00'):
+                key2 = _getch()
                 if key2 == b'H':
                     selected = max(0, selected - 1)
                     moved = True
                 elif key2 == b'P':
                     selected = min(len(rows) - 1, selected + 1)
                     moved = True
+            elif key == b'\x1b':
+                # ANSI escape sequence (Linux/Mac arrow keys)
+                seq = _getch()
+                if seq == b'[':
+                    arrow = _getch()
+                    if arrow == b'A':  # ↑
+                        selected = max(0, selected - 1)
+                        moved = True
+                    elif arrow == b'B':  # ↓
+                        selected = min(len(rows) - 1, selected + 1)
+                        moved = True
+                else:
+                    return None  # plain Esc
             elif key == b'\r':
                 return rows[selected]["value"]
-            elif key == b'\x1b':
-                return None
 
             if moved:
                 _sys.stdout.write(f"\033[{line_count}A")
@@ -2907,10 +2957,10 @@ def _op_model_pick_inner(p) -> None:
         return
 
     try:
-        import msvcrt as _msvcrt
-        _has_msvcrt = True
+        from CMC_Platform import getch as _getch_fn
+        _has_getch = True
     except ImportError:
-        _has_msvcrt = False
+        _has_getch = False
 
     # Rich escape helper — prevents [text] in labels from being parsed as markup
     try:
@@ -3046,7 +3096,7 @@ def _op_model_pick_inner(p) -> None:
             p("[yellow]No OpenAI API key.[/yellow]  Run: ai key set openai <key>")
             return
 
-        picked_effort = _pick_effort_for_backend(p, new_backend, _has_msvcrt, _rescape)
+        picked_effort = _pick_effort_for_backend(p, new_backend, _has_getch, _rescape)
         if picked_effort is None:
             p("[dim]Cancelled.[/dim]")
             return
@@ -3081,8 +3131,10 @@ def _op_model_pick_inner(p) -> None:
             p(f"[green]✓ Model:[/green] {new_model}  [dim]backend: {new_backend}[/dim]")
         p("[dim]Header updates on next restart. AI will use the new model immediately.[/dim]")
 
-    # ── Arrow-key picker (Windows + Rich) ────────────────────────────────
-    if _has_msvcrt and RICH:
+    # ── Arrow-key picker (Rich + getch) ────────────────────────────────
+    if _has_getch and RICH:
+        from CMC_Platform import getch as _getch, IS_WINDOWS
+        import sys as _sys
         console.print("\n[bold cyan]Select AI Model[/bold cyan]  "
                       "[dim]up/down arrows  Enter=confirm  Esc=cancel[/dim]")
         console.print("[dim]" + "─" * 54 + "[/dim]")
@@ -3096,28 +3148,39 @@ def _op_model_pick_inner(p) -> None:
 
         try:
             while True:
-                key   = _msvcrt.getch()
+                key   = _getch()
                 moved = False
 
-                if key in (b'\xe0', b'\x00'):           # special key prefix
-                    key2 = _msvcrt.getch()
+                if IS_WINDOWS and key in (b'\xe0', b'\x00'):  # Windows special key prefix
+                    key2 = _getch()
                     if key2 == b'H':                     # ↑ up
                         sel_pos = max(0, sel_pos - 1)
                         moved   = True
                     elif key2 == b'P':                   # ↓ down
                         sel_pos = min(len(selectable) - 1, sel_pos + 1)
                         moved   = True
+                elif key == b'\x1b':
+                    # ANSI escape (Linux/Mac arrows) or plain Esc
+                    seq = _getch()
+                    if seq == b'[':
+                        arrow = _getch()
+                        if arrow == b'A':                # ↑ up
+                            sel_pos = max(0, sel_pos - 1)
+                            moved   = True
+                        elif arrow == b'B':              # ↓ down
+                            sel_pos = min(len(selectable) - 1, sel_pos + 1)
+                            moved   = True
+                    else:
+                        # plain Esc — cancel
+                        _sys.stdout.write(f"\033[{line_count}A")
+                        for _ in range(line_count):
+                            _sys.stdout.write("\033[2K\n")
+                        _sys.stdout.write(f"\033[{line_count}A")
+                        _sys.stdout.flush()
+                        p("[dim]Cancelled.[/dim]")
+                        return
                 elif key == b'\r':                       # Enter — confirm
                     break
-                elif key == b'\x1b':                     # Esc — cancel
-                    # Move cursor back up and clear the picker lines
-                    _sys.stdout.write(f"\033[{line_count}A")
-                    for _ in range(line_count):
-                        _sys.stdout.write("\033[2K\n")
-                    _sys.stdout.write(f"\033[{line_count}A")
-                    _sys.stdout.flush()
-                    p("[dim]Cancelled.[/dim]")
-                    return
 
                 if moved:
                     cur_gi    = selectable[sel_pos]
@@ -3137,7 +3200,7 @@ def _op_model_pick_inner(p) -> None:
         _apply_choice(items[selectable[sel_pos]])
 
     else:
-        # ── Numbered fallback (no msvcrt) ─────────────────────────────────
+        # ── Numbered fallback (no getch) ──────────────────────────────────
         p("\n[bold cyan]Select AI Model:[/bold cyan]")
         num_map: dict = {}
         n = 1
@@ -3294,12 +3357,14 @@ def op_dns(domain: str, p) -> None:
 
 
 def op_traceroute(host: str, p) -> None:
-    """Trace network route to a host (Windows: tracert)."""
+    """Trace network route to a host (cross-platform)."""
     import subprocess
+    from CMC_Platform import get_traceroute_cmd
     p(f"[cyan]Tracing route to {host} (this may take a while) ...[/cyan]")
     try:
+        cmd = get_traceroute_cmd() + [host]
         proc = subprocess.Popen(
-            ["tracert", "-d", "-w", "2000", host],
+            cmd,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8",
         )
@@ -3308,6 +3373,8 @@ def op_traceroute(host: str, p) -> None:
             if line:
                 p(line)
         proc.wait(timeout=120)
+    except FileNotFoundError:
+        p("[yellow]Traceroute command not found. Install traceroute: sudo apt install traceroute[/yellow]")
     except Exception as e:
         p(f"[red]Traceroute error:[/red] {e}")
 
@@ -3338,64 +3405,162 @@ def op_netcheck(p) -> None:
 
 
 def op_wifi(p) -> None:
-    """Show current WiFi connection info (Windows)."""
+    """Show current WiFi connection info (cross-platform)."""
     import subprocess
+    from CMC_Platform import IS_WINDOWS, IS_LINUX
     try:
-        result = subprocess.run(
-            ["netsh", "wlan", "show", "interfaces"],
-            capture_output=True, text=True, encoding="utf-8", timeout=10,
-        )
-        output = (result.stdout or "").strip()
-        if not output or "no wireless" in output.lower():
-            p("[yellow]No WiFi adapter found or WiFi is disabled.[/yellow]")
-            return
-        # Parse key fields
-        fields = {}
-        for line in output.splitlines():
-            if ":" in line:
-                key, _, val = line.partition(":")
-                fields[key.strip().lower()] = val.strip()
-        ssid = fields.get("ssid", "Unknown")
-        signal = fields.get("signal", "Unknown")
-        state = fields.get("state", "Unknown")
-        channel = fields.get("channel", "—")
-        band = fields.get("radio type", "—")
-        auth = fields.get("authentication", "—")
-        speed_rx = fields.get("receive rate (mbps)", "—")
-        speed_tx = fields.get("transmit rate (mbps)", "—")
+        if IS_WINDOWS:
+            result = subprocess.run(
+                ["netsh", "wlan", "show", "interfaces"],
+                capture_output=True, text=True, encoding="utf-8", timeout=10,
+            )
+            output = (result.stdout or "").strip()
+            if not output or "no wireless" in output.lower():
+                p("[yellow]No WiFi adapter found or WiFi is disabled.[/yellow]")
+                return
+            fields = {}
+            for line in output.splitlines():
+                if ":" in line:
+                    key, _, val = line.partition(":")
+                    fields[key.strip().lower()] = val.strip()
+            ssid = fields.get("ssid", "Unknown")
+            signal = fields.get("signal", "Unknown")
+            state = fields.get("state", "Unknown")
+            channel = fields.get("channel", "—")
+            band = fields.get("radio type", "—")
+            auth = fields.get("authentication", "—")
+            speed_rx = fields.get("receive rate (mbps)", "—")
+            speed_tx = fields.get("transmit rate (mbps)", "—")
+        elif IS_LINUX:
+            # Try nmcli first, fall back to iwconfig
+            try:
+                result = subprocess.run(
+                    ["nmcli", "-t", "-f", "ACTIVE,SSID,SIGNAL,CHAN,FREQ,SECURITY,RATE", "dev", "wifi"],
+                    capture_output=True, text=True, encoding="utf-8", timeout=10,
+                )
+                active = [l for l in result.stdout.strip().splitlines() if l.startswith("yes:")]
+                if not active:
+                    p("[yellow]No active WiFi connection found.[/yellow]")
+                    return
+                parts = active[0].split(":")
+                ssid = parts[1] if len(parts) > 1 else "Unknown"
+                signal = f"{parts[2]}%" if len(parts) > 2 else "Unknown"
+                channel = parts[3] if len(parts) > 3 else "—"
+                band = parts[4] if len(parts) > 4 else "—"
+                auth = parts[5] if len(parts) > 5 else "—"
+                speed_rx = parts[6].replace(" Mbit/s", "") if len(parts) > 6 else "—"
+                speed_tx = speed_rx
+                state = "connected"
+            except FileNotFoundError:
+                result = subprocess.run(
+                    ["iwconfig"], capture_output=True, text=True, encoding="utf-8", timeout=10,
+                )
+                output = result.stdout or ""
+                ssid = signal = state = "Unknown"
+                channel = band = auth = speed_rx = speed_tx = "—"
+                for line in output.splitlines():
+                    if "ESSID:" in line:
+                        ssid = line.split("ESSID:")[1].strip().strip('"')
+                        state = "connected"
+                    if "Signal level" in line:
+                        signal = line.split("Signal level=")[1].split()[0] if "Signal level=" in line else "—"
+                    if "Bit Rate" in line:
+                        speed_rx = line.split("Bit Rate=")[1].split()[0] if "Bit Rate=" in line else "—"
+                        speed_tx = speed_rx
+        else:  # macOS
+            result = subprocess.run(
+                ["/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport", "-I"],
+                capture_output=True, text=True, encoding="utf-8", timeout=10,
+            )
+            fields = {}
+            for line in result.stdout.splitlines():
+                if ":" in line:
+                    key, _, val = line.partition(":")
+                    fields[key.strip().lower()] = val.strip()
+            ssid = fields.get("ssid", "Unknown")
+            signal = fields.get("agrctlrssi", "Unknown")
+            state = "connected" if ssid != "Unknown" else "disconnected"
+            channel = fields.get("channel", "—")
+            band = "—"
+            auth = fields.get("link auth", "—")
+            speed_rx = fields.get("lastassocstatus", "—")
+            speed_tx = speed_rx
+
         p(f"[bold]WiFi Status:[/bold] {state}")
         p(f"  SSID:     [cyan]{ssid}[/cyan]")
         p(f"  Signal:   [cyan]{signal}[/cyan]")
         p(f"  Channel:  {channel}  |  Band: {band}")
         p(f"  Speed:    ↓{speed_rx} Mbps  ↑{speed_tx} Mbps")
         p(f"  Auth:     {auth}")
+    except FileNotFoundError:
+        p("[yellow]WiFi tools not found on this system.[/yellow]")
     except Exception as e:
         p(f"[red]WiFi info error:[/red] {e}")
 
 
 def op_mobile(p) -> None:
-    """Show mobile broadband (cellular) connection info (Windows)."""
+    """Show mobile broadband (cellular) connection info (cross-platform)."""
     import subprocess
+    from CMC_Platform import IS_WINDOWS, IS_LINUX
     try:
-        result = subprocess.run(
-            ["netsh", "mbn", "show", "interfaces"],
-            capture_output=True, text=True, encoding="utf-8", timeout=10,
-        )
-        output = (result.stdout or "").strip()
-        if not output or "is not running" in output.lower() or "not found" in output.lower():
-            p("[yellow]No mobile broadband adapter found or service not running.[/yellow]")
+        if IS_WINDOWS:
+            result = subprocess.run(
+                ["netsh", "mbn", "show", "interfaces"],
+                capture_output=True, text=True, encoding="utf-8", timeout=10,
+            )
+            output = (result.stdout or "").strip()
+            if not output or "is not running" in output.lower() or "not found" in output.lower():
+                p("[yellow]No mobile broadband adapter found or service not running.[/yellow]")
+                return
+            fields = {}
+            for line in output.splitlines():
+                if ":" in line:
+                    key, _, val = line.partition(":")
+                    fields[key.strip().lower()] = val.strip()
+            provider = fields.get("home provider", fields.get("provider name", "Unknown"))
+            state = fields.get("state", "Unknown")
+            signal = fields.get("signal", fields.get("signal strength", "Unknown"))
+            dev_type = fields.get("device type", "—")
+            interface = fields.get("name", "—")
+        elif IS_LINUX:
+            # Try mmcli (ModemManager)
+            try:
+                result = subprocess.run(
+                    ["mmcli", "-L"], capture_output=True, text=True, encoding="utf-8", timeout=10,
+                )
+                if "No modems" in (result.stdout or "") or result.returncode != 0:
+                    p("[yellow]No mobile broadband modem detected.[/yellow]")
+                    return
+                # Get first modem index
+                import re as _re
+                modem_match = _re.search(r"/Modem/(\d+)", result.stdout)
+                if not modem_match:
+                    p("[yellow]No mobile broadband modem detected.[/yellow]")
+                    return
+                idx = modem_match.group(1)
+                result = subprocess.run(
+                    ["mmcli", "-m", idx], capture_output=True, text=True, encoding="utf-8", timeout=10,
+                )
+                output = result.stdout or ""
+                provider = state = signal = "Unknown"
+                dev_type = interface = "—"
+                for line in output.splitlines():
+                    line = line.strip()
+                    if "operator name" in line.lower():
+                        provider = line.split(":", 1)[1].strip()
+                    elif "state" in line.lower() and ":" in line:
+                        state = line.split(":", 1)[1].strip()
+                    elif "signal quality" in line.lower():
+                        signal = line.split(":", 1)[1].strip()
+                    elif "model" in line.lower():
+                        dev_type = line.split(":", 1)[1].strip()
+            except FileNotFoundError:
+                p("[yellow]ModemManager (mmcli) not found. Install: sudo apt install modemmanager[/yellow]")
+                return
+        else:
+            p("[yellow]Mobile broadband info is not available on macOS via CLI.[/yellow]")
             return
-        # Parse key fields
-        fields = {}
-        for line in output.splitlines():
-            if ":" in line:
-                key, _, val = line.partition(":")
-                fields[key.strip().lower()] = val.strip()
-        provider = fields.get("home provider", fields.get("provider name", "Unknown"))
-        state = fields.get("state", "Unknown")
-        signal = fields.get("signal", fields.get("signal strength", "Unknown"))
-        dev_type = fields.get("device type", "—")
-        interface = fields.get("name", "—")
+
         p(f"[bold]Mobile Broadband Status:[/bold] {state}")
         p(f"  Interface:  [cyan]{interface}[/cyan]")
         p(f"  Provider:   [cyan]{provider}[/cyan]")
@@ -3436,12 +3601,14 @@ def op_speedtest(p) -> None:
 
 
 def op_flush_dns(p) -> None:
-    """Flush the DNS resolver cache."""
+    """Flush the DNS resolver cache (cross-platform)."""
     import subprocess
+    from CMC_Platform import get_flush_dns_cmd
     p("[cyan]Flushing DNS cache ...[/cyan]")
     try:
+        cmd = get_flush_dns_cmd()
         result = subprocess.run(
-            ["ipconfig", "/flushdns"],
+            cmd,
             capture_output=True, text=True, encoding="utf-8", timeout=10,
         )
         output = (result.stdout or "").strip()
@@ -3449,16 +3616,19 @@ def op_flush_dns(p) -> None:
             p(f"[green]{output}[/green]")
         else:
             p("[green]DNS cache flushed.[/green]")
+    except FileNotFoundError:
+        p("[yellow]DNS flush command not found on this system.[/yellow]")
     except Exception as e:
         p(f"[red]Failed to flush DNS:[/red] {e}")
 
 
 def op_net_status(p) -> None:
-    """Show network adapter status."""
+    """Show network adapter status (cross-platform)."""
     import subprocess
+    from CMC_Platform import get_network_info_cmd
     try:
         result = subprocess.run(
-            ["ipconfig", "/all"],
+            get_network_info_cmd(),
             capture_output=True, text=True, encoding="utf-8", timeout=10,
         )
         output = (result.stdout or "").strip()
@@ -4558,11 +4728,6 @@ def handle_command(s: str):
     if low == "exit":
         sys.exit(0)
 
-    # Simple echo for macros
-    m = re.match(r'^echo\s+["“](.+?)["”]$', s, re.I)
-    if m:
-        p(m.group(1)); return
-
 
     # ---------- Alias Commands ----------
     m = re.match(r"^alias\s+add\s+([A-Za-z0-9_\-]+)\s*(?:=\s*)?(.+)$", s, re.I)
@@ -4604,30 +4769,13 @@ def handle_command(s: str):
         return
         
             # ---------- Java management ----------
-    # Fallback helpers in case _apply_java_env / save_java_cfg aren't defined in this build
-    def _apply_java_env_local(home_path: str):
-        try:
-            _apply_java_env(home_path)  # existing helper (if present in your build)
-        except NameError:
-            # Minimal local apply for this process only
-            os.environ["JAVA_HOME"] = home_path
-            binp = str(Path(home_path) / "bin")
-            if binp not in os.environ.get("PATH", ""):
-                os.environ["PATH"] = os.environ.get("PATH", "") + ";" + binp
 
-    def _save_java_cfg_local(ver: str, home_path: str):
-        try:
-            save_java_cfg(ver, home_path)  # existing helper (if present)
-        except NameError:
-            pass  # no-op if not present
-
-  
 
     if low == "java list":
-        if not JAVA_VERSIONS:
-            p("[yellow]No JAVA_VERSIONS configured in this build.[/yellow]")
+        if not get_java_versions():
+            p("[yellow]No Java versions found on this system.[/yellow]")
         else:
-            for k, v in JAVA_VERSIONS.items():
+            for k, v in get_java_versions().items():
                 tag = "(installed)" if Path(v).exists() else "(missing)"
                 p(f"{k} -> {v} {tag}")
         return
@@ -4658,7 +4806,7 @@ def handle_command(s: str):
                     continue
 
             if new_home and Path(new_home).exists():
-                _apply_java_env_local(new_home)
+                _apply_java_env(new_home)
 
                 # Ensure PATH bin is present for this process (matches system PATH)
                 binp = str(Path(new_home) / "bin")
@@ -4667,7 +4815,7 @@ def handle_command(s: str):
                     
                     
                 STATE["java_version"] = Path(new_home).name
-                _save_java_cfg_local(STATE["java_version"], new_home)
+                save_java_cfg(STATE["java_version"], new_home)
                 p(f"🔄 Reloaded Java from registry: {new_home}")
                 p(f"✅ Now active: {STATE['java_version']}")
             else:
@@ -4687,8 +4835,8 @@ def handle_command(s: str):
         chosen_key = None
 
         # 1. Direct key match (exact key name in JAVA_VERSIONS)
-        if arg in JAVA_VERSIONS:
-            target_path = JAVA_VERSIONS[arg]
+        if arg in get_java_versions():
+            target_path = get_java_versions()[arg]
             chosen_key = arg
 
         # 2. Numeric major-version match: "17" → "jdk-17.0.16.8-hotspot" or key "17.0.2"
@@ -4696,7 +4844,7 @@ def handle_command(s: str):
         #    installation whose folder/key name starts with major version 17.
         if not target_path and re.fullmatch(r"\d+", arg):
             best_key = best_path = None
-            for k, v in JAVA_VERSIONS.items():
+            for k, v in get_java_versions().items():
                 first_num = re.search(r"(\d+)", k)
                 if first_num and first_num.group(1) == arg:
                     # Prefer JDK over JRE when multiple hits share the same major version
@@ -4712,7 +4860,7 @@ def handle_command(s: str):
 
         # Not found — tell the user what IS installed
         if not target_path:
-            installed = {k: v for k, v in JAVA_VERSIONS.items() if Path(v).exists()}
+            installed = {k: v for k, v in get_java_versions().items() if Path(v).exists()}
             if installed:
                 def _major(k):
                     n = re.search(r"(\d+)", k)
@@ -4731,97 +4879,114 @@ def handle_command(s: str):
             return
 
         # ---- Apply to current process (CMC runtime only) ----
+        from CMC_Platform import IS_WINDOWS, PATH_SEP
         java_bin = str(Path(target_path) / "bin")
         os.environ["JAVA_HOME"] = target_path
         if java_bin not in os.environ.get("PATH", ""):
-            os.environ["PATH"] = os.environ.get("PATH", "") + f";{java_bin}"
+            os.environ["PATH"] = os.environ.get("PATH", "") + PATH_SEP + java_bin
 
         STATE["java_version"] = chosen_key or arg
-        _save_java_cfg_local(STATE["java_version"], target_path)
+        save_java_cfg(STATE["java_version"], target_path)
 
-        # ---- Tier 1: Set user-level JAVA_HOME and user Path (no admin needed) ----
-        try:
-            import winreg as _wr
-            _hkcu_env = r"Environment"
-
-            # Set user JAVA_HOME
-            with _wr.OpenKey(_wr.HKEY_CURRENT_USER, _hkcu_env, 0, _wr.KEY_READ | _wr.KEY_WRITE) as _k:
-                _wr.SetValueEx(_k, "JAVA_HOME", 0, _wr.REG_EXPAND_SZ, target_path)
-
-                # Update user Path: strip old java/jdk entries, prepend new bin
-                try:
-                    _cur_path, _ = _wr.QueryValueEx(_k, "Path")
-                except FileNotFoundError:
-                    _cur_path = ""
-                _parts = [e for e in _cur_path.split(";") if e.strip() and
-                          "java" not in e.lower() and "jdk" not in e.lower()]
-                _parts.insert(0, java_bin)
-                _wr.SetValueEx(_k, "Path", 0, _wr.REG_EXPAND_SZ, ";".join(_parts))
-
-            p(f"[green]✔ User JAVA_HOME → {target_path}[/green]" if RICH else f"User JAVA_HOME -> {target_path}")
-            p(f"[green]✔ User Path updated (java bin prepended)[/green]" if RICH else "User Path updated.")
-        except Exception as e:
-            p(f"[yellow]Could not set user environment:[/yellow] {e}" if RICH else f"Could not set user environment: {e}")
-
-        # ---- Tier 2: Try system-level (needs admin) ----
-        try:
-            import winreg
-            reg_path = r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"
-
-            with winreg.OpenKey(
-                winreg.HKEY_LOCAL_MACHINE, reg_path, 0,
-                winreg.KEY_READ | winreg.KEY_WRITE,
-            ) as key:
-                # Set system JAVA_HOME directly via registry
-                winreg.SetValueEx(key, "JAVA_HOME", 0, winreg.REG_EXPAND_SZ, target_path)
-
-                # Update system Path: strip old java/jdk entries, prepend new bin
-                current_path, _ = winreg.QueryValueEx(key, "Path")
-                parts = current_path.split(";")
-                parts = [
-                    entry for entry in parts
-                    if "java" not in entry.lower() and "jdk" not in entry.lower()
-                ]
-                parts.insert(0, java_bin)
-                new_path = ";".join(parts)
-                winreg.SetValueEx(key, "Path", 0, winreg.REG_EXPAND_SZ, new_path)
-
-            p(f"[green]✔ System JAVA_HOME → {target_path}[/green]" if RICH else f"System JAVA_HOME -> {target_path}")
-            p(f"[green]✔ System Path updated (java bin prepended)[/green]" if RICH else "System Path updated.")
-            p("[dim]Restart terminals and launchers to apply PATH changes.[/dim]" if RICH else "Restart terminals to apply PATH changes.")
-
-        except PermissionError:
-            # ---- Tier 3: Request UAC elevation via PowerShell ----
-            p("[yellow]Admin rights needed for system PATH. Requesting elevation...[/yellow]" if RICH else "Admin rights needed. Requesting elevation...")
-            # Build the PowerShell script as plain text, then base64-encode it
-            # to avoid all quoting issues when passing via -EncodedCommand.
-            ps_lines = [
-                '$regPath = "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment"',
-                f'Set-ItemProperty -Path $regPath -Name JAVA_HOME -Value "{target_path}" -Type ExpandString',
-                '$cur = (Get-ItemProperty -Path $regPath -Name Path).Path',
-                '$parts = $cur -split ";" | Where-Object { $_ -and $_.ToLower() -notmatch "java|jdk" }',
-                f'$newPath = "{java_bin};" + ($parts -join ";")',
-                'Set-ItemProperty -Path $regPath -Name Path -Value $newPath -Type ExpandString',
-            ]
-            ps_script = "\n".join(ps_lines)
+        if IS_WINDOWS:
+            # ---- Tier 1: Set user-level JAVA_HOME and user Path (no admin needed) ----
             try:
-                import ctypes, base64
-                encoded_cmd = base64.b64encode(ps_script.encode("utf-16-le")).decode("ascii")
-                ret = ctypes.windll.shell32.ShellExecuteW(
-                    None, "runas", "powershell.exe",
-                    f"-NoProfile -ExecutionPolicy Bypass -EncodedCommand {encoded_cmd}",
-                    None, 1,
-                )
-                if ret > 32:
-                    p("[green]Elevation requested — check the admin window.[/green]" if RICH else "Elevation requested - check the admin window.")
-                else:
-                    p("[red]Elevation was denied or failed.[/red]" if RICH else "Elevation was denied or failed.")
-            except Exception as e2:
-                p(f"[red]Could not request elevation:[/red] {e2}" if RICH else f"Could not request elevation: {e2}")
+                import winreg as _wr
+                _hkcu_env = r"Environment"
 
-        except Exception as e:
-            p(f"[yellow]System-level Java update failed:[/yellow] {e}" if RICH else f"System-level Java update failed: {e}")
-            p("User-level JAVA_HOME was set. For system-wide, run CMC as admin.")
+                # Set user JAVA_HOME
+                with _wr.OpenKey(_wr.HKEY_CURRENT_USER, _hkcu_env, 0, _wr.KEY_READ | _wr.KEY_WRITE) as _k:
+                    _wr.SetValueEx(_k, "JAVA_HOME", 0, _wr.REG_EXPAND_SZ, target_path)
+
+                    # Update user Path: strip old java/jdk entries, prepend new bin
+                    try:
+                        _cur_path, _ = _wr.QueryValueEx(_k, "Path")
+                    except FileNotFoundError:
+                        _cur_path = ""
+                    _parts = [e for e in _cur_path.split(";") if e.strip() and
+                              "java" not in e.lower() and "jdk" not in e.lower()]
+                    _parts.insert(0, java_bin)
+                    _wr.SetValueEx(_k, "Path", 0, _wr.REG_EXPAND_SZ, ";".join(_parts))
+
+                p(f"[green]✔ User JAVA_HOME → {target_path}[/green]" if RICH else f"User JAVA_HOME -> {target_path}")
+                p(f"[green]✔ User Path updated (java bin prepended)[/green]" if RICH else "User Path updated.")
+            except Exception as e:
+                p(f"[yellow]Could not set user environment:[/yellow] {e}" if RICH else f"Could not set user environment: {e}")
+
+            # ---- Tier 2: Try system-level (needs admin) ----
+            try:
+                import winreg
+                reg_path = r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"
+
+                with winreg.OpenKey(
+                    winreg.HKEY_LOCAL_MACHINE, reg_path, 0,
+                    winreg.KEY_READ | winreg.KEY_WRITE,
+                ) as key:
+                    # Set system JAVA_HOME directly via registry
+                    winreg.SetValueEx(key, "JAVA_HOME", 0, winreg.REG_EXPAND_SZ, target_path)
+
+                    # Update system Path: strip old java/jdk entries, prepend new bin
+                    current_path, _ = winreg.QueryValueEx(key, "Path")
+                    parts = current_path.split(";")
+                    parts = [
+                        entry for entry in parts
+                        if "java" not in entry.lower() and "jdk" not in entry.lower()
+                    ]
+                    parts.insert(0, java_bin)
+                    new_path = ";".join(parts)
+                    winreg.SetValueEx(key, "Path", 0, winreg.REG_EXPAND_SZ, new_path)
+
+                p(f"[green]✔ System JAVA_HOME → {target_path}[/green]" if RICH else f"System JAVA_HOME -> {target_path}")
+                p(f"[green]✔ System Path updated (java bin prepended)[/green]" if RICH else "System Path updated.")
+                p("[dim]Restart terminals and launchers to apply PATH changes.[/dim]" if RICH else "Restart terminals to apply PATH changes.")
+
+            except PermissionError:
+                # ---- Tier 3: Request UAC elevation via PowerShell ----
+                p("[yellow]Admin rights needed for system PATH. Requesting elevation...[/yellow]" if RICH else "Admin rights needed. Requesting elevation...")
+                ps_lines = [
+                    '$regPath = "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment"',
+                    f'Set-ItemProperty -Path $regPath -Name JAVA_HOME -Value "{target_path}" -Type ExpandString',
+                    '$cur = (Get-ItemProperty -Path $regPath -Name Path).Path',
+                    '$parts = $cur -split ";" | Where-Object { $_ -and $_.ToLower() -notmatch "java|jdk" }',
+                    f'$newPath = "{java_bin};" + ($parts -join ";")',
+                    'Set-ItemProperty -Path $regPath -Name Path -Value $newPath -Type ExpandString',
+                ]
+                ps_script = "\n".join(ps_lines)
+                try:
+                    import ctypes, base64
+                    encoded_cmd = base64.b64encode(ps_script.encode("utf-16-le")).decode("ascii")
+                    ret = ctypes.windll.shell32.ShellExecuteW(
+                        None, "runas", "powershell.exe",
+                        f"-NoProfile -ExecutionPolicy Bypass -EncodedCommand {encoded_cmd}",
+                        None, 1,
+                    )
+                    if ret > 32:
+                        p("[green]Elevation requested — check the admin window.[/green]" if RICH else "Elevation requested - check the admin window.")
+                    else:
+                        p("[red]Elevation was denied or failed.[/red]" if RICH else "Elevation was denied or failed.")
+                except Exception as e2:
+                    p(f"[red]Could not request elevation:[/red] {e2}" if RICH else f"Could not request elevation: {e2}")
+
+            except Exception as e:
+                p(f"[yellow]System-level Java update failed:[/yellow] {e}" if RICH else f"System-level Java update failed: {e}")
+                p("User-level JAVA_HOME was set. For system-wide, run CMC as admin.")
+        else:
+            # ---- Linux / macOS: update shell profile ----
+            p(f"[green]✔ JAVA_HOME set for this session → {target_path}[/green]" if RICH else f"JAVA_HOME set -> {target_path}")
+            # Try to persist in ~/.bashrc or ~/.zshrc
+            shell_rc = Path.home() / (".zshrc" if os.environ.get("SHELL", "").endswith("zsh") else ".bashrc")
+            try:
+                rc_text = shell_rc.read_text(encoding="utf-8") if shell_rc.exists() else ""
+                # Remove old JAVA_HOME lines we previously added
+                new_lines = [l for l in rc_text.splitlines() if "# CMC-JAVA" not in l]
+                new_lines.append(f'export JAVA_HOME="{target_path}"  # CMC-JAVA')
+                new_lines.append(f'export PATH="{java_bin}:$PATH"  # CMC-JAVA')
+                shell_rc.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+                p(f"[green]✔ Updated {shell_rc.name} (restart shell to apply)[/green]" if RICH else f"Updated {shell_rc.name}.")
+            except Exception as e:
+                p(f"[yellow]Could not update {shell_rc}:[/yellow] {e}" if RICH else f"Could not update shell profile: {e}")
+                p(f"Add manually: export JAVA_HOME=\"{target_path}\"")
+                p(f"              export PATH=\"{java_bin}:$PATH\"")
 
         return
 
@@ -5023,15 +5188,6 @@ def handle_command(s: str):
     m = re.match(r"^backup\s+'(.+?)'\s+'(.+?)'$", s, re.I)
     if m:
         op_backup(m.group(1), m.group(2)); return
-
-    # ---------- Log / Undo ----------
-    if low == "log":
-        op_log(); return
-
-    if low == "undo":
-        op_undo(); return
-
-
 
 
     # ---------- Macros (inline) ----------
@@ -5277,23 +5433,24 @@ def handle_command(s: str):
 
 
 
-    # ---------- CMD passthrough ----------
-    # Opens a real Windows Command Prompt session inside the same window.
-    # Type 'exit' to return back to CMC after using normal CMD commands.
-    if low == "cmd":
+    # ---------- Shell passthrough ----------
+    # Opens a system shell session inside the same window.
+    # Type 'exit' to return back to CMC.
+    if low in ("cmd", "shell"):
         if STATE.get("dry_run"):
-            p("[yellow]DRY-RUN:[/yellow] CMD session skipped.")
+            p("[yellow]DRY-RUN:[/yellow] Shell session skipped.")
             return
         if not STATE.get("batch"):
-            if not confirm("Open a full CMD session? You can type 'exit' to return to CMC."):
+            if not confirm("Open a system shell session? Type 'exit' to return to CMC."):
                 p("[yellow]Canceled.[/yellow]")
                 return
         try:
-            p("[cyan]Entering Windows CMD mode — type 'exit' to return to CMC.[/cyan]")
-            os.system("cmd")
-            p("[cyan]Returned from CMD mode.[/cyan]")
+            from CMC_Platform import open_system_shell
+            p("[cyan]Entering shell mode — type 'exit' to return to CMC.[/cyan]")
+            open_system_shell()
+            p("[cyan]Returned from shell mode.[/cyan]")
         except Exception as e:
-            p(f"[red]❌ CMD session failed:[/red] {e}")
+            p(f"[red]❌ Shell session failed:[/red] {e}")
         return
 
 
@@ -6373,13 +6530,7 @@ def main():
     global CWD
     global _MACRO_CONT_NAME, _MACRO_CONT_PARTS
 
-    # Give the background update-check thread a moment to finish before painting
-    # the header — it's fast (git fetch locally), so 1.5s is more than enough.
-    import time as _time
-    _deadline = _time.monotonic() + 1.5
-    while STATE.get("cmc_update_status") == "checking" and _time.monotonic() < _deadline:
-        _time.sleep(0.05)
-
+    # Header renders instantly; update notification appears below if found.
     show_header()
     _start_bg_java_detect(5.0)
 

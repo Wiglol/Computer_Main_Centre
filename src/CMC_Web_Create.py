@@ -500,13 +500,16 @@ def _generate_backend_flask(cfg: ProjectConfig, server_dir: Path) -> None:
         "    app.run(debug=True)\n",
         encoding="utf-8",
     )
-    (server_dir / "start_server.bat").write_text(
-        "@echo off\n"
-        "cd /d %~dp0\n"
-        "call venv\\Scripts\\activate.bat\n"
-        "python app.py\n",
-        encoding="utf-8",
-    )
+    from CMC_Platform import IS_WINDOWS
+    if IS_WINDOWS:
+        (server_dir / "start_server.bat").write_text(
+            "@echo off\ncd /d %~dp0\ncall venv\\Scripts\\activate.bat\npython app.py\n",
+            encoding="utf-8",
+        )
+    else:
+        script = server_dir / "start_server.sh"
+        script.write_text("#!/bin/sh\ncd \"$(dirname \"$0\")\"\nsource venv/bin/activate\npython app.py\n", encoding="utf-8")
+        script.chmod(0o755)
     (server_dir / ".gitignore").write_text(
         "venv/\n__pycache__/\n*.pyc\n",
         encoding="utf-8",
@@ -546,13 +549,16 @@ def _generate_backend_fastapi(cfg: ProjectConfig, server_dir: Path) -> None:
         "    uvicorn.run('app:app', reload=True)\n",
         encoding="utf-8",
     )
-    (server_dir / "start_server.bat").write_text(
-        "@echo off\n"
-        "cd /d %~dp0\n"
-        "call venv\\Scripts\\activate.bat\n"
-        "python app.py\n",
-        encoding="utf-8",
-    )
+    from CMC_Platform import IS_WINDOWS
+    if IS_WINDOWS:
+        (server_dir / "start_server.bat").write_text(
+            "@echo off\ncd /d %~dp0\ncall venv\\Scripts\\activate.bat\npython app.py\n",
+            encoding="utf-8",
+        )
+    else:
+        script = server_dir / "start_server.sh"
+        script.write_text("#!/bin/sh\ncd \"$(dirname \"$0\")\"\nsource venv/bin/activate\npython app.py\n", encoding="utf-8")
+        script.chmod(0o755)
     (server_dir / ".gitignore").write_text(
         "venv/\n__pycache__/\n*.pyc\n",
         encoding="utf-8",
@@ -607,12 +613,15 @@ def _generate_backend_express(cfg: ProjectConfig, server_dir: Path) -> None:
         "node_modules/\n",
         encoding="utf-8",
     )
-    (server_dir / "start_server.bat").write_text(
-        "@echo off\n"
-        "cd /d %~dp0\n"
-        "npm start\n",
-        encoding="utf-8",
-    )
+    from CMC_Platform import IS_WINDOWS
+    if IS_WINDOWS:
+        (server_dir / "start_server.bat").write_text(
+            "@echo off\ncd /d %~dp0\nnpm start\n", encoding="utf-8",
+        )
+    else:
+        script = server_dir / "start_server.sh"
+        script.write_text("#!/bin/sh\ncd \"$(dirname \"$0\")\"\nnpm start\n", encoding="utf-8")
+        script.chmod(0o755)
 
     print("Installing Express backend dependencies with npm...")
     ok = _run_cmd(["npm", "install"], server_dir)
@@ -647,34 +656,51 @@ def _generate_backend(cfg: ProjectConfig) -> None:
 
 def _write_launcher(cfg: ProjectConfig) -> None:
     """Create a universal launcher that starts frontend + backend."""
-    launcher_path = cfg.folder / "start_app.bat"
-
-    lines = [
-        "@echo off",
-        "setlocal",
-        "",
-        "echo Starting backend (if available)...",
-        "IF EXIST server\\venv\\Scripts\\python.exe (",
-        "    start cmd /k \"cd server && venv\\Scripts\\python.exe app.py\"",
-        ") ELSE IF EXIST server\\package.json (",
-        "    start cmd /k \"cd server && npm start\"",
-        ") ELSE (",
-        "    echo No backend found.",
-        ")",
-        "",
-        "echo Starting frontend (if available)...",
-        "IF EXIST client\\package.json (",
-        "    start cmd /k \"cd client && npm run dev\"",
-        ") ELSE (",
-        "    echo No frontend found.",
-        ")",
-        "",
-        "echo Done!",
-        "pause",
-        ""
-    ]
-
-    launcher_path.write_text("\n".join(lines), encoding="utf-8")
+    from CMC_Platform import IS_WINDOWS
+    if IS_WINDOWS:
+        launcher_path = cfg.folder / "start_app.bat"
+        lines = [
+            "@echo off", "setlocal", "",
+            "echo Starting backend (if available)...",
+            "IF EXIST server\\venv\\Scripts\\python.exe (",
+            "    start cmd /k \"cd server && venv\\Scripts\\python.exe app.py\"",
+            ") ELSE IF EXIST server\\package.json (",
+            "    start cmd /k \"cd server && npm start\"",
+            ") ELSE (",
+            "    echo No backend found.",
+            ")", "",
+            "echo Starting frontend (if available)...",
+            "IF EXIST client\\package.json (",
+            "    start cmd /k \"cd client && npm run dev\"",
+            ") ELSE (",
+            "    echo No frontend found.",
+            ")", "",
+            "echo Done!", "pause", ""
+        ]
+        launcher_path.write_text("\n".join(lines), encoding="utf-8")
+    else:
+        launcher_path = cfg.folder / "start_app.sh"
+        lines = [
+            "#!/bin/sh", "",
+            "echo 'Starting backend (if available)...'",
+            "if [ -f server/venv/bin/python ]; then",
+            "    (cd server && source venv/bin/activate && python app.py) &",
+            "elif [ -f server/package.json ]; then",
+            "    (cd server && npm start) &",
+            "else",
+            "    echo 'No backend found.'",
+            "fi", "",
+            "echo 'Starting frontend (if available)...'",
+            "if [ -f client/package.json ]; then",
+            "    (cd client && npm run dev) &",
+            "else",
+            "    echo 'No frontend found.'",
+            "fi", "",
+            "echo 'Done! Press Ctrl+C to stop.'",
+            "wait", ""
+        ]
+        launcher_path.write_text("\n".join(lines), encoding="utf-8")
+        launcher_path.chmod(0o755)
 
 
 def op_web_create() -> None:

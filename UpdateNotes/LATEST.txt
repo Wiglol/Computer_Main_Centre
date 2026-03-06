@@ -40,3 +40,31 @@ Computer Main Centre - Release Notes (05/03/2026)
 - 14 = Media Tools (FFmpeg)
 - 15 = Docker
 - 16 = Flags & Modes
+
+[ Performance ]
+
+- Removed 1.5s busy-wait on startup (update check)
+- Reduced Ollama timeout 0.5s → 0.1s
+- Lazy-loaded Java version detection (deferred until first use)
+- Added pip dependency check sentinel (~/.ai_helper/.cmc_deps_ok) — skips on repeat starts
+- Removed dead duplicate code (MIN_PY, REQUIRED vars, duplicate handlers)
+
+[ Cross-Platform (Linux / Mac) ]
+
+- New CMC_Platform.py module — centralizes all platform-specific logic
+- Java detection now works on Linux (scans /usr/lib/jvm, /usr/java, ~/.sdkman, $JAVA_HOME)
+- 'java set' writes to ~/.bashrc or ~/.zshrc on Linux/Mac instead of Windows registry
+- Network commands (traceroute, wifi, mobile, flush dns, net status) all cross-platform
+- sysinfo GPU detection uses lspci (Linux) or system_profiler (Mac)
+- File/URL opening uses xdg-open (Linux) / open (Mac) automatically
+- Arrow-key model/effort pickers work with ANSI escape sequences (not just msvcrt)
+- 'cmd' command renamed to 'shell' — opens bash/zsh on Linux/Mac
+- Project scaffolding generates .sh scripts on Linux/Mac instead of .bat
+- Venv activation instructions adapt to platform automatically
+
+[ Code Cleanup ]
+
+- Removed duplicate command handlers (log, undo, echo)
+- Removed duplicate Java helper functions
+- Renamed bootstrap p() to _bootstrap_print() to avoid shadowing
+- Consolidated platform checks into CMC_Platform.py imports
