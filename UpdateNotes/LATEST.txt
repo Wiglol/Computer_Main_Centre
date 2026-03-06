@@ -1,4 +1,4 @@
-Computer Main Centre - Release Notes (05/03/2026)
+Computer Main Centre - Release Notes (06/03/2026)
 
 [ UTF-8 Fix ]
 
@@ -48,6 +48,7 @@ Computer Main Centre - Release Notes (05/03/2026)
 - Lazy-loaded Java version detection (deferred until first use)
 - Added pip dependency check sentinel (~/.ai_helper/.cmc_deps_ok) — skips on repeat starts
 - Removed dead duplicate code (MIN_PY, REQUIRED vars, duplicate handlers)
+- Update checker no longer shows "checking..." in header — only appears if an update is found
 
 [ Cross-Platform (Linux / Mac) ]
 
